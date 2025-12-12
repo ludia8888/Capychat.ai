@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { deleteFAQ, updateFAQ } from "../../../../lib/faq";
 import { AuthError, requireAdmin } from "../../../../lib/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function PUT(req: Request, { params }: { params: { id: string } }) {
   try {
     const user = await requireAdmin();

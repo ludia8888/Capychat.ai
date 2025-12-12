@@ -3,6 +3,9 @@ import { getChatSettings, updateChatSettings } from "../../../../lib/config";
 import { AuthError, getUserFromCookies, requireAdmin } from "../../../../lib/auth";
 import { resolveTenantId } from "../../../../lib/tenant";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function GET() {
   try {
     const user = await getUserFromCookies();

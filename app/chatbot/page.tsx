@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { Suspense, useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { Send, RefreshCw, X } from "lucide-react";
 
@@ -11,7 +11,7 @@ const defaultThumbnailUrl = "/capychat_mascot.png";
 const fallbackThumbnail = "/capychat_mascot.png";
 const tenantKey = process.env.NEXT_PUBLIC_TENANT_KEY || "default";
 
-export default function ChatbotPage() {
+function ChatbotContent() {
   const searchParams = useSearchParams();
   const isEmbed = (searchParams?.get("embed") ?? "") === "1";
   const [input, setInput] = useState("");
@@ -275,5 +275,13 @@ export default function ChatbotPage() {
         </p>
       </footer>
     </div>
+  );
+}
+
+export default function ChatbotPage() {
+  return (
+    <Suspense fallback={<div className="p-6 text-center text-gray-500">챗봇 로딩 중...</div>}>
+      <ChatbotContent />
+    </Suspense>
   );
 }

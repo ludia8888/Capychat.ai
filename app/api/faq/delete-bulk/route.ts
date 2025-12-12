@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { prisma } from "../../../../lib/db";
 import { AuthError, requireAdmin } from "../../../../lib/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export async function POST(req: Request) {
   try {
     const user = await requireAdmin();

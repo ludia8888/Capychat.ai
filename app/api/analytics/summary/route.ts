@@ -3,6 +3,9 @@ import { prisma } from "../../../../lib/db";
 import { Prisma } from "@prisma/client";
 import { AuthError, requireAdmin } from "../../../../lib/auth";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 const isMissingTable = (err: unknown) =>
   err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2021";
 
