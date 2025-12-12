@@ -2,10 +2,13 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import Image from "next/image";
 import { Send, RefreshCw, X } from "lucide-react";
 
 type Message = { id: string; role: "user" | "assistant"; text: string; timestamp: string };
+
+const defaultHeaderText = "당특순에게 모두 물어보세요!";
+const defaultThumbnailUrl = "/capychat_mascot.png";
+const fallbackThumbnail = "/capychat_mascot.png";
 
 export default function ChatbotPage() {
   const searchParams = useSearchParams();
@@ -16,11 +19,46 @@ export default function ChatbotPage() {
   const [error, setError] = useState<string | null>(null);
   const [isComposing, setIsComposing] = useState(false);
   const [hasStarted, setHasStarted] = useState(false);
+  const [chatHeaderText, setChatHeaderText] = useState(defaultHeaderText);
+  const [chatThumbnailUrl, setChatThumbnailUrl] = useState(defaultThumbnailUrl);
+  const [chatThumbnailDataUrl, setChatThumbnailDataUrl] = useState("");
+  const trackEvent = async (payload: Record<string, any>) => {
+    try {
+      await fetch("/api/analytics/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+    } catch {
+      // ignore analytics failure
+    }
+  };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  const renderMessageText = (text: string) => {
+    const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const parts = text.split(urlRegex);
+    return parts.map((part, idx) =>
+      urlRegex.test(part) ? (
+        <a
+          key={idx}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline underline-offset-2"
+        >
+          {part}
+        </a>
+      ) : (
+        <span key={idx}>{part}</span>
+      )
+    );
   };
 
   useEffect(() => {
@@ -65,6 +103,8 @@ export default function ChatbotPage() {
     ]);
     setInput("");
     setLoading(true);
+    // fire-and-forget tracking
+    trackEvent({ type: "chat_question", payload: { length: trimmed.length } });
 
     try {
       const res = await fetch("/api/chatbot", {
@@ -97,6 +137,22 @@ export default function ChatbotPage() {
     }
   };
 
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const res = await fetch("/api/config/chat");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data?.settings?.headerText) setChatHeaderText(data.settings.headerText);
+        if (data?.settings?.thumbnailUrl) setChatThumbnailUrl(data.settings.thumbnailUrl);
+        if (data?.settings?.thumbnailDataUrl) setChatThumbnailDataUrl(data.settings.thumbnailDataUrl);
+      } catch (err) {
+        console.error("chat config load error", err);
+      }
+    };
+    loadConfig();
+  }, []);
+
   return (
     <div className={`flex ${isEmbed ? "h-full min-h-[560px]" : "h-screen"} flex-col bg-white text-gray-900 relative overflow-hidden font-sans`}>
       {/* Top Black Bar (Simulated Window Control / App Header) */}
@@ -125,18 +181,21 @@ export default function ChatbotPage() {
             </div>
 
             {/* Hero Section */}
-            <div className="flex items-center justify-center gap-5 text-2xl md:text-3xl font-bold tracking-tight text-gray-800 w-full">
-              <span className="text-right whitespace-nowrap">카피챗에게</span>
-              <div className="relative w-32 h-32 md:w-44 md:h-44 flex-shrink-0 rounded-full overflow-hidden border border-gray-100 shadow-sm mx-1">
-                <Image
-                  src="/capychat_mascot.png"
-                  alt="Capychat Mascot"
-                  fill
-                  className="object-cover"
-                  priority
+            <div className="flex flex-col items-center justify-center gap-4 text-2xl md:text-3xl font-bold tracking-tight text-gray-800 w-full">
+              <div className="relative w-32 h-32 md:w-44 md:h-44 flex-shrink-0 rounded-full overflow-hidden border border-gray-100 shadow-sm mx-1 bg-white">
+                <img
+                  src={chatThumbnailDataUrl || chatThumbnailUrl || fallbackThumbnail}
+                  alt="Chat thumbnail"
+                  className="h-full w-full object-cover"
+                  onError={(e) => {
+                    e.currentTarget.onerror = null;
+                    e.currentTarget.src = fallbackThumbnail;
+                  }}
                 />
               </div>
-              <span className="text-left whitespace-nowrap">모두 물어보세요!</span>
+              <span className="text-center whitespace-pre-line leading-tight">
+                {chatHeaderText || defaultHeaderText}
+              </span>
             </div>
           </div>
         )}
@@ -152,7 +211,7 @@ export default function ChatbotPage() {
                     : 'bg-gray-100 text-gray-800 rounded-tl-sm border border-gray-200'
                   }`}
                 >
-                  {m.text}
+                  {renderMessageText(m.text)}
                 </div>
               </div>
             ))}
@@ -204,7 +263,7 @@ export default function ChatbotPage() {
       {/* Footer */}
       <footer className="py-4 text-center shrink-0">
         <p className="text-[11px] text-gray-400 font-medium">
-          Powered by <span className="text-gray-600 font-semibold">capychat.ai</span>
+          Powered by <span className="text-gray-600 font-semibold">UXONE</span>
         </p>
       </footer>
     </div>

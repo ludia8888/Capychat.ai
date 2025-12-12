@@ -13,6 +13,7 @@ model FAQArticle {
   categoryId Int?
   title      String
   content    String
+  media      Json?
   sourceType String?   @default("llm_import")
   confidence Float?
   createdAt  DateTime  @default(now())
@@ -29,4 +30,23 @@ model Category {
   faqs      FAQArticle[]
 
   @@unique([name], map: "category_name_unique")
+}
+
+model SiteConfig {
+  key       String   @id
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model InteractionLog {
+  id        Int      @id @default(autoincrement())
+  type      String   // chat_question | faq_click
+  faqId     Int?
+  faqTitle  String?
+  payload   Json?
+  createdAt DateTime @default(now())
+
+  @@index([type, createdAt])
+  @@index([faqId, createdAt])
 }

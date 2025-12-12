@@ -8,9 +8,19 @@ type FAQItem = {
   category: string | null;
   title: string;
   content: string;
+  media?: MediaItem[] | null;
+};
+
+type MediaItem = {
+  kind: "image" | "video";
+  url: string;
+  name?: string;
 };
 
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
+const siteBase = process.env.NEXT_PUBLIC_SITE_BASE?.replace(/\/$/, "");
+const supportLink =
+  process.env.NEXT_PUBLIC_SUPPORT_LINK || (siteBase ? `${siteBase}/support` : "https://talk.naver.com/ct/w5z46j#nafullscreen");
 
 // NOTE: /docs is the single source of truth (SSOT) view for FAQ content.
 // CS 챗봇이나 다른 클라이언트는 이 페이지에 노출되는 데이터(FAQ + 카테고리)를 기준으로 답변/동기화하도록 유지하세요.
@@ -20,6 +30,18 @@ export default function DocsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
+  const trackEvent = async (payload: Record<string, any>) => {
+    try {
+      await fetch("/api/analytics/events", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        keepalive: true,
+      });
+    } catch {
+      // ignore analytics failure
+    }
+  };
 
   const categoryOptions = useMemo(() => categories.map((c) => c.name), [categories]);
 
@@ -50,6 +72,18 @@ export default function DocsPage() {
     const id = `cat-${slugify(name)}`;
     const el = document.getElementById(id);
     if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  const parseMedia = (raw: any): MediaItem[] => {
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .map((m) => {
+        const kind = m?.kind === "video" ? "video" : "image";
+        const url = typeof m?.url === "string" ? m.url : "";
+        const name = typeof m?.name === "string" ? m.name : undefined;
+        return url ? { kind, url, name } : null;
+      })
+      .filter(Boolean) as MediaItem[];
   };
 
   const loadData = async () => {
@@ -106,16 +140,30 @@ export default function DocsPage() {
       }}
     >
       <div className="mx-auto max-w-5xl px-6 py-10 space-y-8">
-        <header className="space-y-2">
-          <p className="text-sm uppercase tracking-widest" style={{ color: colors.subtext }}>
-            Docs
-          </p>
-          <h1 className="text-3xl font-semibold" style={{ color: colors.text }}>
-            두 분의 이야기가 더 아름답게 기록될 수 있도록
-          </h1>
-          <p style={{ color: colors.subtext }}>
-            작은 궁금증 하나까지 놓치지 않도록, 당특순이 자주 받은 질문들을 한자리에 담았습니다.
-          </p>
+        <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="space-y-2">
+            <p className="text-sm uppercase tracking-widest" style={{ color: colors.subtext }}>
+              Docs
+            </p>
+            <h1 className="text-3xl font-semibold" style={{ color: colors.text }}>
+              두 분의 이야기가 더 아름답게 기록될 수 있도록
+            </h1>
+            <p style={{ color: colors.subtext }}>
+              작은 궁금증 하나까지 놓치지 않도록, 당특순이 자주 받은 질문들을 한자리에 담았습니다.
+            </p>
+          </div>
+          <a
+            href={supportLink}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-2 self-start rounded-full px-4 py-2 text-sm font-semibold shadow-md transition hover:-translate-y-[1px]"
+            style={{ backgroundColor: "#05d686", color: "white", boxShadow: "0 8px 20px rgba(5, 214, 134, 0.25)" }}
+          >
+            톡톡하기
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m9 5 7 7-7 7" />
+            </svg>
+          </a>
         </header>
 
         {errorMessage && (
@@ -203,6 +251,7 @@ export default function DocsPage() {
                         key={item.id}
                         className="rounded-xl p-4 space-y-2"
                         style={{ backgroundColor: "white", border: `1px solid ${colors.border}` }}
+                        onClick={() => trackEvent({ type: "faq_click", faqId: item.id, faqTitle: item.title })}
                       >
                         <h4 className="text-sm font-semibold" style={{ color: colors.text }}>
                           {item.title}
@@ -210,6 +259,38 @@ export default function DocsPage() {
                         <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: colors.text }}>
                           {item.content}
                         </p>
+                        {(() => {
+                          const mediaList = parseMedia(item.media);
+                          if (!mediaList.length) return null;
+                          return (
+                          <div className="space-y-2">
+                            <p className="text-xs font-semibold" style={{ color: colors.subtext }}>
+                              첨부
+                            </p>
+                            <div className="flex flex-wrap gap-3">
+                              {mediaList.map((m, idx) =>
+                                m.kind === "video" ? (
+                                  <video key={`${m.url}-${idx}`} controls className="h-28 w-44 rounded-lg border" style={{ borderColor: colors.border }}>
+                                    <source src={m.url} />
+                                  </video>
+                                ) : (
+                                  <img
+                                    key={`${m.url}-${idx}`}
+                                    src={m.url}
+                                    alt={m.name || "첨부 이미지"}
+                                    className="h-28 w-28 rounded-lg border object-cover"
+                                    style={{ borderColor: colors.border }}
+                                    onError={(e) => {
+                                      e.currentTarget.onerror = null;
+                                      e.currentTarget.style.display = "none";
+                                    }}
+                                  />
+                                )
+                              )}
+                            </div>
+                          </div>
+                          );
+                        })()}
                       </article>
                     ))}
                   </div>
