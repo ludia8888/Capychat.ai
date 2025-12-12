@@ -1,12 +1,15 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import Image from "next/image";
 import { Send, RefreshCw, X } from "lucide-react";
 
 type Message = { id: string; role: "user" | "assistant"; text: string; timestamp: string };
 
 export default function ChatbotPage() {
+  const searchParams = useSearchParams();
+  const isEmbed = (searchParams?.get("embed") ?? "") === "1";
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -95,7 +98,7 @@ export default function ChatbotPage() {
   };
 
   return (
-    <div className="flex h-screen flex-col bg-white text-gray-900 relative overflow-hidden font-sans">
+    <div className={`flex ${isEmbed ? "h-full min-h-[560px]" : "h-screen"} flex-col bg-white text-gray-900 relative overflow-hidden font-sans`}>
       {/* Top Black Bar (Simulated Window Control / App Header) */}
       <div className="bg-black text-white px-6 py-3 flex justify-between items-center shrink-0 w-full z-50 relative">
         <div />
