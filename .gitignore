@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Next.js build outputs
+.next/
+out/
+
+# Env & local config
+.env
+.env.local
+.env.*.local
+
+# Logs and caches
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.turbo/
+
+# Editor/OS
+.DS_Store
+.vscode/
+
+# TypeScript
+*.tsbuildinfo
