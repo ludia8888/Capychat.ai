@@ -7,8 +7,23 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model Tenant {
+  id        Int      @id @default(autoincrement())
+  name      String
+  key       String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users       User[]
+  categories  Category[]
+  faqs        FAQArticle[]
+  siteConfigs SiteConfig[]
+  logs        InteractionLog[]
+}
+
 model FAQArticle {
   id         Int       @id @default(autoincrement())
+  tenantId   Int
   category   String?
   categoryId Int?
   title      String
@@ -19,34 +34,66 @@ model FAQArticle {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  tenant     Tenant    @relation(fields: [tenantId], references: [id])
   categoryRel Category? @relation(fields: [categoryId], references: [id])
+
+  @@index([tenantId])
 }
 
 model Category {
   id        Int      @id @default(autoincrement())
+  tenantId  Int
   name      String
   createdAt DateTime @default(now())
 
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
   faqs      FAQArticle[]
 
-  @@unique([name], map: "category_name_unique")
+  @@unique([tenantId, name], map: "category_name_unique")
+  @@index([tenantId])
 }
 
 model SiteConfig {
-  key       String   @id
+  id        Int      @id @default(autoincrement())
+  tenantId  Int
+  key       String
   value     String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, key])
+  @@index([tenantId])
 }
 
 model InteractionLog {
   id        Int      @id @default(autoincrement())
+  tenantId  Int
   type      String   // chat_question | faq_click
+  message   String?
   faqId     Int?
   faqTitle  String?
   payload   Json?
   createdAt DateTime @default(now())
 
-  @@index([type, createdAt])
-  @@index([faqId, createdAt])
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, type, createdAt])
+  @@index([tenantId, faqId, createdAt])
+}
+
+model User {
+  id           Int      @id @default(autoincrement())
+  tenantId     Int
+  email        String
+  passwordHash String
+  role         String   @default("admin")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
 }

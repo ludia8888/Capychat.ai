@@ -9,6 +9,7 @@ type Message = { id: string; role: "user" | "assistant"; text: string; timestamp
 const defaultHeaderText = "당특순에게 모두 물어보세요!";
 const defaultThumbnailUrl = "/capychat_mascot.png";
 const fallbackThumbnail = "/capychat_mascot.png";
+const tenantKey = process.env.NEXT_PUBLIC_TENANT_KEY || "default";
 
 export default function ChatbotPage() {
   const searchParams = useSearchParams();
@@ -26,7 +27,7 @@ export default function ChatbotPage() {
     try {
       await fetch("/api/analytics/events", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", "x-tenant-key": tenantKey },
         body: JSON.stringify(payload),
         keepalive: true,
       });
@@ -43,9 +44,10 @@ export default function ChatbotPage() {
 
   const renderMessageText = (text: string) => {
     const urlRegex = /(https?:\/\/[^\s]+)/g;
+    const urlTester = /^https?:\/\/\S+$/i;
     const parts = text.split(urlRegex);
     return parts.map((part, idx) =>
-      urlRegex.test(part) ? (
+      urlTester.test(part) ? (
         <a
           key={idx}
           href={part}
@@ -104,10 +106,10 @@ export default function ChatbotPage() {
     setInput("");
     setLoading(true);
     // fire-and-forget tracking
-    trackEvent({ type: "chat_question", payload: { length: trimmed.length } });
+    trackEvent({ type: "chat_question", message: trimmed, payload: { length: trimmed.length } });
 
     try {
-      const res = await fetch("/api/chatbot", {
+      const res = await fetch(`/api/chatbot?tenant=${tenantKey}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: trimmed }),
@@ -140,7 +142,7 @@ export default function ChatbotPage() {
   useEffect(() => {
     const loadConfig = async () => {
       try {
-        const res = await fetch("/api/config/chat");
+        const res = await fetch(`/api/config/chat?tenant=${tenantKey}`);
         if (!res.ok) return;
         const data = await res.json();
         if (data?.settings?.headerText) setChatHeaderText(data.settings.headerText);
@@ -176,7 +178,7 @@ export default function ChatbotPage() {
           <div className="flex flex-col items-center gap-6 text-center animate-in fade-in zoom-in duration-700 w-full mb-4">
 
             {/* Logo Bubble */}
-            <div className="h-16 w-16 rounded-full bg-black flex items-center justify-center text-white font-bold text-lg shadow-xl z-10 relative left-[-30px]">
+            <div className="h-16 w-16 rounded-full bg-black flex items-center justify-center text-white font-bold text-lg shadow-xl z-10">
               QnA
             </div>
 
@@ -257,6 +259,12 @@ export default function ChatbotPage() {
             </button>
           </div>
         </div>
+
+        {error && (
+          <div className="w-full max-w-3xl text-center rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
 
       </main>
 

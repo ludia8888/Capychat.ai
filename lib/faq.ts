@@ -1,10 +1,11 @@
 import { prisma } from "./db";
 import { FAQArticle } from "@prisma/client";
-import { normalizeWordSet, similarityScore } from "./similarity";
+import { similarityScore } from "./similarity";
 
 export type GenerateRequest = {
   raw_text: string;
   default_category?: string | null;
+  tenantId: number;
 };
 
 export type FAQCreate = {
@@ -13,6 +14,7 @@ export type FAQCreate = {
   content: string;
   sourceType?: string | null;
   confidence?: number | null;
+  media?: MediaItem[];
 };
 
 export type FAQItem = FAQArticle;
@@ -33,23 +35,50 @@ type CategoryChoice = {
 const PROMPT_TEMPLATE = `너에게 한국어 고객 상담 로그나 Q/A가 뒤섞인 긴 텍스트 뭉치를 준다.
 
 너의 작업:
-1) 질문/답변을 문맥으로 최대한 정확히 추출한다. (Q/A 라벨이 없어도 질문과 답변을 짝지어라)
-2) 슬래시(/), 쉼표(,), 번호(1., 1-1., 주-2 등)로 여러 질문이 묶여 있으면 각 질문을 분리해 별도 FAQ 항목으로 만든다. 동일 답변을 공유해도 질문별로 분리된 항목을 반환한다.
-3) category는 질문 성격을 대표하는 짧은 한 단어/구(예: 배송, 결제, 계정, 환불 등)로 반드시 너(LLM)가 지정한다. 입력에 없으면 추정해 채워라.
-4) 아래 JSON 배열만 반환하라. 다른 텍스트를 추가하지 말 것.
+1) 어떤 형식의 문서이든 질문/답변으로 분리한다.
+2) 질문/답변을 문맥으로 최대한 정확히 추출한다. (Q/A 라벨이 없어도 질문과 답변을 짝지어라)
+3) 슬래시(/), 쉼표(,), 번호(1., 1-1., 주-2 등)로 여러 질문이 묶여 있으면 각 질문을 분리해 별도 FAQ 항목으로 만든다. 동일 답변을 공유해도 질문별로 분리된 항목을 반환한다.
+4) category는 질문 성격을 대표하는 짧은 한 단어/구(예: 배송, 결제, 계정, 환불 등)로 반드시 너(LLM)가 지정한다. 입력에 없으면 추정해 채워라.
+5) confidence는 0~1 사이 실수로 채워라. 보통 0.6~0.9 사이 값으로 작성하고, 매우 확실할 때만 0.95 이상, 불확실하지만 추정 가능할 때는 0.55~0.6을 사용한다. 0이나 1은 사용하지 않는다.
+6) 아래 JSON 배열만 반환하라. 다른 텍스트를 추가하지 말 것.
 [
-  { "question": "질문", "answer": "답변", "category": "카테고리", "confidence": 0.0 }
+  { "question": "질문", "answer": "답변", "category": "카테고리", "confidence": 0.78 }
 ]
 
 아래는 원본 텍스트이다:
----
+--- 
 {raw_text}
 ---`;
 
 const LLM_CONFIDENCE_THRESHOLD = parseFloat(process.env.LLM_CONFIDENCE_THRESHOLD || "0.0");
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || "15000");
 
-async function callLLM(rawText: string, retry = false): Promise<Array<Record<string, any>>> {
-  if (!process.env.OPENAI_API_KEY) return [];
+type AppError = Error & { status?: number };
+
+const withStatus = (message: string, status: number): AppError => {
+  const err = new Error(message) as AppError;
+  err.status = status;
+  return err;
+};
+
+const normalizeMedia = (raw: any): MediaItem[] => {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((m) => {
+      const url = typeof m?.url === "string" ? m.url : "";
+      if (!url) return null;
+      const kind: "image" | "video" = m?.kind === "video" ? "video" : "image";
+      const name = typeof m?.name === "string" ? m.name : undefined;
+      return { kind, url, name };
+    })
+    .filter(Boolean) as MediaItem[];
+};
+
+async function callLLM(rawText: string): Promise<Array<Record<string, any>>> {
+  if (!process.env.OPENAI_API_KEY) {
+    throw withStatus("OPENAI_API_KEY is missing", 503);
+  }
+
   const model = process.env.LLM_MODEL || "gpt-4o-mini";
   const payload: Record<string, any> = {
     model,
@@ -58,62 +87,56 @@ async function callLLM(rawText: string, retry = false): Promise<Array<Record<str
       { role: "user", content: PROMPT_TEMPLATE.replace("{raw_text}", rawText) },
     ],
   };
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+  };
+  if (process.env.OPENAI_ORG_ID) headers["OpenAI-Organization"] = process.env.OPENAI_ORG_ID;
+  if (process.env.OPENAI_PROJECT_ID) headers["OpenAI-Project"] = process.env.OPENAI_PROJECT_ID;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
     console.log("[LLM] request model:", model, "chars:", rawText.length);
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-    };
-    if (process.env.OPENAI_ORG_ID) headers["OpenAI-Organization"] = process.env.OPENAI_ORG_ID;
-    if (process.env.OPENAI_PROJECT_ID) headers["OpenAI-Project"] = process.env.OPENAI_PROJECT_ID;
-
     const res = await fetch(`${(process.env.LLM_API_BASE || "https://api.openai.com/v1").replace(/\/$/, "")}/chat/completions`, {
       method: "POST",
       headers,
       body: JSON.stringify(payload),
+      signal: controller.signal,
     });
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`LLM HTTP ${res.status}: ${text}`);
+      const text = await res.text().catch(() => "");
+      throw withStatus(`LLM HTTP ${res.status}${text ? `: ${text}` : ""}`, 502);
     }
     const data = await res.json();
     console.log("[LLM] response usage:", data?.usage);
     const content = data.choices?.[0]?.message?.content;
     console.log("[LLM] raw content snippet:", typeof content === "string" ? content.slice(0, 500) : content);
-    if (!content) return [];
-    const parsed = JSON.parse(content);
-    if (Array.isArray(parsed)) {
-      console.log("[LLM] parsed array len:", parsed.length);
-      return parsed;
+    if (!content) {
+      throw withStatus("LLM response empty", 502);
     }
-    if (parsed.items && Array.isArray(parsed.items)) {
-      console.log("[LLM] parsed items len:", parsed.items.length);
-      return parsed.items;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(content);
+    } catch (err) {
+      throw withStatus("LLM response is not valid JSON", 502);
     }
-    if (parsed.questions && Array.isArray(parsed.questions)) {
-      console.log("[LLM] parsed questions len:", parsed.questions.length);
-      return parsed.questions;
+
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed?.items && Array.isArray(parsed.items)) return parsed.items;
+    if (parsed?.questions && Array.isArray(parsed.questions)) return parsed.questions;
+    if (parsed?.question && parsed?.answer) return [parsed];
+
+    throw withStatus("LLM response has unexpected shape", 502);
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw withStatus("LLM request timed out", 504);
     }
-    if (parsed.question && parsed.answer) {
-      console.log("[LLM] parsed single object -> array wrap");
-      return [parsed];
-    }
-    if (parsed.error && !retry) {
-      console.warn("[LLM] format error from model, retrying once with stricter instruction");
-      return await callLLM(
-        `${rawText}\n\n위 출력이 형식 오류였습니다. 반드시 JSON 배열만 반환하세요.`,
-        true
-      );
-    }
-    console.log("[LLM] parsed fallback to empty; keys:", Object.keys(parsed || {}));
-    return [];
-  } catch (err) {
-    console.error("LLM call failed:", err);
-    if (!retry) {
-      console.warn("[LLM] retrying once after failure");
-      return callLLM(`${rawText}\n\n이전 시도가 실패했습니다. 반드시 JSON 배열만 반환하세요.`, true);
-    }
-    return [];
+    if (err?.status) throw err;
+    throw withStatus(err?.message || "LLM call failed", 502);
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -145,12 +168,24 @@ function normalizeFaqItems(rawItems: Array<Record<string, any>>, defaultCategory
     const title = item.question || item.title || "제목 없음";
     const content = item.answer || item.content || "";
     const category = item.category ?? defaultCategory ?? "일반";
+    let confidence: number | null = typeof item.confidence === "number" ? item.confidence : null;
+    // Fallback: 0 또는 비어있을 때는 기본 0.6으로 채워 필터링을 통과하도록 한다.
+    if (confidence !== null && confidence <= 0) confidence = 0.6;
     return {
       category,
       title,
       content,
       sourceType: item.source_type || "llm_import",
-      confidence: typeof item.confidence === "number" ? item.confidence : null,
+      confidence,
+      media: Array.isArray(item.media)
+        ? item.media
+          .map((m) => ({
+            kind: (m.kind === "video" ? "video" : "image") as "image" | "video",
+            url: typeof m.url === "string" ? m.url : "",
+            name: typeof m.name === "string" ? m.name : undefined,
+          }))
+          .filter((m) => !!m.url)
+        : [],
     };
   });
 }
@@ -158,11 +193,12 @@ function normalizeFaqItems(rawItems: Array<Record<string, any>>, defaultCategory
 export async function generateFAQs(
   payload: GenerateRequest
 ): Promise<GenerateResult> {
-  const { raw_text, default_category } = payload;
+  const { raw_text, default_category, tenantId } = payload;
   if (!raw_text?.trim()) {
     throw new Error("raw_text is required");
   }
   const categories = await prisma.category.findMany({
+    where: { tenantId },
     orderBy: { name: "asc" },
   });
 
@@ -187,7 +223,7 @@ export async function generateFAQs(
       items: [],
       addedCount: 0,
       skippedDuplicates: 0,
-      totalAfter: await prisma.fAQArticle.count(),
+      totalAfter: await prisma.fAQArticle.count({ where: { tenantId } }),
     };
   }
 
@@ -195,10 +231,12 @@ export async function generateFAQs(
     toInsert.map((item) =>
       prisma.fAQArticle.create({
         data: {
+          tenantId,
           category: item.category,
           categoryId: (item as any).categoryId ?? null,
           title: item.title,
           content: item.content,
+          media: item.media ?? [],
           sourceType: item.sourceType || "llm_import",
           confidence: item.confidence,
         },
@@ -206,7 +244,7 @@ export async function generateFAQs(
     )
   );
 
-  const totalAfter = await prisma.fAQArticle.count();
+  const totalAfter = await prisma.fAQArticle.count({ where: { tenantId } });
   return {
     items: created,
     addedCount: created.length,
@@ -215,17 +253,18 @@ export async function generateFAQs(
   };
 }
 
-export async function listFAQs(query?: string, category?: string | null) {
+export async function listFAQs(query: string | undefined, category: string | null | undefined, tenantId: number) {
   return prisma.fAQArticle.findMany({
     where: {
       AND: [
+        { tenantId },
         query
           ? {
-              OR: [
-                { title: { contains: query, mode: "insensitive" } },
-                { content: { contains: query, mode: "insensitive" } },
-              ],
-            }
+            OR: [
+              { title: { contains: query, mode: "insensitive" } },
+              { content: { contains: query, mode: "insensitive" } },
+            ],
+          }
           : {},
         category ? { category } : {},
       ],
@@ -234,9 +273,35 @@ export async function listFAQs(query?: string, category?: string | null) {
   });
 }
 
-export async function updateFAQ(id: number, data: Partial<FAQCreate>) {
+export async function createFAQ(data: FAQCreate, tenantId: number) {
+  if (!data.title?.trim() || !data.content?.trim()) {
+    throw new Error("title and content are required");
+  }
+
+  let categoryId: number | null = null;
+  if (data.category) {
+    const cat = await prisma.category.findFirst({ where: { name: data.category, tenantId } });
+    categoryId = cat ? cat.id : null;
+  }
+
+  const created = await prisma.fAQArticle.create({
+    data: {
+      tenantId,
+      title: data.title,
+      content: data.content,
+      category: data.category,
+      categoryId,
+      media: normalizeMedia(data.media),
+      sourceType: data.sourceType || "manual",
+      confidence: data.confidence,
+    },
+  });
+  return created;
+}
+
+export async function updateFAQ(id: number, data: Partial<FAQCreate>, tenantId: number) {
   const existing = await prisma.fAQArticle.findUnique({ where: { id } });
-  if (!existing) throw new Error("FAQ not found");
+  if (!existing || existing.tenantId !== tenantId) throw new Error("FAQ not found");
 
   let categoryId: number | null | undefined = undefined;
   if (data.category !== undefined) {
@@ -244,18 +309,22 @@ export async function updateFAQ(id: number, data: Partial<FAQCreate>) {
       categoryId = null;
     } else {
       const cat = await prisma.category.findFirst({
-        where: { name: data.category },
+        where: { name: data.category, tenantId },
       });
       categoryId = cat ? cat.id : null;
     }
   }
 
+  const normalizedMedia = data.media === undefined ? undefined : normalizeMedia(data.media);
+
   const updated = await prisma.fAQArticle.update({
     where: { id },
     data: {
+      tenantId,
       title: data.title ?? undefined,
       content: data.content ?? undefined,
       category: data.category ?? undefined,
+      media: normalizedMedia,
       categoryId,
       updatedAt: new Date(),
     },
@@ -263,7 +332,16 @@ export async function updateFAQ(id: number, data: Partial<FAQCreate>) {
   return updated;
 }
 
-export async function deleteFAQ(id: number) {
+export async function deleteFAQ(id: number, tenantId: number) {
+  const existing = await prisma.fAQArticle.findUnique({ where: { id } });
+  if (!existing || existing.tenantId !== tenantId) {
+    throw new Error("FAQ not found");
+  }
   await prisma.fAQArticle.delete({ where: { id } });
   return { status: "deleted", id };
 }
+export type MediaItem = {
+  kind: "image" | "video";
+  url: string;
+  name?: string;
+};

@@ -1,42 +1,34 @@
 import { FAQArticle } from "@prisma/client";
-import { normalizeWordSet, similarityScore } from "./similarity";
-
-const SYSTEM_PROMPT = `
-당신은 “당특순 CS 챗봇” 당특순입니다.
-이름 그대로 “당신의 특별한 순간을 돕는 존재”로서,
-예비부부가 걱정 없이 서비스를 사용할 수 있도록
-따뜻하고 친절한 말투로 안내하는 전문 웨딩 컨시어지입니다.
-
-페르소나/말투 규칙:
-- 따뜻하고 친절한 존댓말
-- 간결하지만 인간적인 문장, 과장/명령/인터넷체 금지
-
-응답 규칙:
-1) 일반 인사/라이트 토크: 공감형 인사 후 가볍게 안내, FAQ 링크는 붙이지 않는다.
-2) 서비스 관련 질문(템플릿, 결제, 환불, 업로드 등): FAQ 매칭 내용으로 답변하고 마지막에
-   “더 자세한 안내가 필요하시면 FAQ 문서에서도 편안하게 확인하실 수 있어요. 👉 FAQ 보러가기: {{FAQ_LINK}}”
-3) 정보 부족/모호/지원 불가 영역: 공감 → 정보 부족 알림 → 관리자 문의 권유 (FAQ 링크는 붙이지 않고, 👉 관리자에게 직접 문의하기: {{SUPPORT_LINK}}).
-
-답변 스타일:
-- 공감 먼저 → 차분한 정보 → 안심시키는 마무리 (예: “천천히 살펴보셔도 괜찮아요.”)
-
-FAQ는 아래 JSON 배열로 제공된다. 사용자가 묻는 내용과 가장 관련 있는 항목으로 답변을 작성하되,
-직접적인 매칭이 없으면 관리자 문의 안내를 한다.
-`.trim();
+import { similarityScore } from "./similarity";
+import { DEFAULT_SYSTEM_PROMPT } from "./chatbotPrompt";
 
 const FAQ_LINK = process.env.NEXT_PUBLIC_SITE_BASE
   ? `${process.env.NEXT_PUBLIC_SITE_BASE.replace(/\/$/, "")}/docs`
   : "http://localhost:3000/docs";
-// Real-time support is removed; keep a mock link placeholder for any “관리자 문의” 안내.
-const SUPPORT_LINK = "https://example.com/support";
+// 관리자 문의는 지정된 톡 링크로 연결한다. 환경변수가 있으면 우선한다.
+const SUPPORT_LINK = process.env.NEXT_PUBLIC_SUPPORT_LINK || "https://talk.naver.com/ct/w5z46j#nafullscreen";
+const LLM_TIMEOUT_MS = Number(process.env.LLM_TIMEOUT_MS || "15000");
+
+type AppError = Error & { status?: number };
+
+const withStatus = (message: string, status: number): AppError => {
+  const err = new Error(message) as AppError;
+  err.status = status;
+  return err;
+};
 
 type Retrieved = Pick<FAQArticle, "id" | "title" | "content" | "category"> & { score: number };
 
 export async function callChatbotLLM(
   message: string,
-  faqs: Pick<FAQArticle, "title" | "content" | "category" | "id">[]
-) {
+  faqs: Pick<FAQArticle, "title" | "content" | "category" | "id">[],
+  systemPrompt?: string
+  ) {
   const msgNorm = message.toLowerCase();
+  const promptText = (systemPrompt || DEFAULT_SYSTEM_PROMPT || "").trim() || DEFAULT_SYSTEM_PROMPT;
+  if (!process.env.OPENAI_API_KEY) {
+    throw withStatus("OPENAI_API_KEY is missing", 503);
+  }
 
   // 1) retrieve: 유사도 + 부분문자열 부스팅
   const scored: Retrieved[] = faqs.map((f) => {
@@ -79,7 +71,7 @@ FAQ 링크는 ${FAQ_LINK} 입니다.
     messages: [
       {
         role: "system",
-        content: SYSTEM_PROMPT.replace("{{FAQ_LINK}}", FAQ_LINK).replace("{{SUPPORT_LINK}}", SUPPORT_LINK),
+        content: promptText.replace("{{FAQ_LINK}}", FAQ_LINK).replace("{{SUPPORT_LINK}}", SUPPORT_LINK),
       },
       {
         role: "user",
@@ -88,24 +80,38 @@ FAQ 링크는 ${FAQ_LINK} 입니다.
     ],
   };
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), LLM_TIMEOUT_MS);
   try {
-    const res = await fetch(`${(process.env.LLM_API_BASE || "https://api.openai.com/v1").replace(/\/$/, "")}/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
-      },
-      body: JSON.stringify(payload),
-    });
+    const res = await fetch(
+      `${(process.env.LLM_API_BASE || "https://api.openai.com/v1").replace(/\/$/, "")}/chat/completions`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      }
+    );
     if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`LLM HTTP ${res.status}: ${text}`);
+      const text = await res.text().catch(() => "");
+      throw withStatus(`LLM HTTP ${res.status}${text ? `: ${text}` : ""}`, 502);
     }
     const data = await res.json();
     const content = data.choices?.[0]?.message?.content?.trim();
-    return content || "죄송합니다. 잠시 후 다시 시도해 주세요.";
-  } catch (err) {
-    console.error("callChatbotLLM error:", err);
-    return "죄송합니다. 응답이 지연되고 있어요. 잠시 후 다시 시도해 주세요.";
+    if (!content) {
+      throw withStatus("LLM response empty", 502);
+    }
+    return content;
+  } catch (err: any) {
+    if (err?.name === "AbortError") {
+      throw withStatus("LLM request timed out", 504);
+    }
+    if (err?.status) throw err;
+    throw withStatus(err?.message || "LLM request failed", 502);
+  } finally {
+    clearTimeout(timeout);
   }
 }

@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../lib/db";
 import { Prisma } from "@prisma/client";
+import { resolveTenantId } from "../../../../lib/tenant";
 
 const isMissingTable = (err: unknown) =>
   err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2021";
 
 export async function POST(req: Request) {
   try {
+    const tenant = await resolveTenantId({ req });
     const body = await req.json().catch(() => ({}));
     const type = body?.type;
     if (type !== "chat_question" && type !== "faq_click") {
@@ -16,12 +18,20 @@ export async function POST(req: Request) {
     const faqId = body?.faqId ? Number(body.faqId) : null;
     const faqTitle = typeof body?.faqTitle === "string" ? body.faqTitle : null;
     const payload = body?.payload ?? null;
+    const message =
+      typeof body?.message === "string"
+        ? body.message.slice(0, 500)
+        : typeof payload?.message === "string"
+        ? payload.message.slice(0, 500)
+        : null;
 
     await prisma.interactionLog.create({
       data: {
+        tenantId: tenant.id,
         type,
         faqId,
         faqTitle,
+        message,
         payload,
       },
     });

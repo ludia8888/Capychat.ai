@@ -1,25 +1,18 @@
 import { NextResponse } from "next/server";
-import { prisma } from "../../../../lib/db";
+import { createFAQ } from "../../../../lib/faq";
 import { AuthError, requireAdmin } from "../../../../lib/auth";
 
 export async function POST(req: Request) {
   try {
     const user = await requireAdmin();
     const body = await req.json();
-    const name = (body?.name ?? "").trim();
-    if (!name) {
-      return NextResponse.json({ detail: "name is required" }, { status: 400 });
+    if (!body?.title || !body?.content) {
+      return NextResponse.json({ detail: "title and content are required" }, { status: 400 });
     }
-
-    const created = await prisma.category.create({
-      data: {
-        tenantId: user.tenantId,
-        name,
-      },
-    });
+    const created = await createFAQ(body, user.tenantId);
     return NextResponse.json(created);
   } catch (err: any) {
-    console.error("create category error:", err);
+    console.error("create faq error:", err);
     if (err instanceof AuthError || err?.status === 401 || err?.status === 403) {
       return NextResponse.json({ detail: err?.message || "Unauthorized" }, { status: err?.status || 401 });
     }

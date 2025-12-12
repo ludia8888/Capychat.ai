@@ -2,7 +2,9 @@
 
 import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { DEFAULT_SYSTEM_PROMPT } from "../../lib/chatbotPrompt";
+import { Edit3, Trash2, Plus, RefreshCw, Save, X, Search, MessageSquare, FileText, BarChart3, Settings, LogOut } from "lucide-react";
 
 type FAQItem = {
   id: number;
@@ -20,19 +22,46 @@ type MediaItem = {
   name?: string;
 };
 
-const snippet = (text: string, max = 80) => (text && text.length > max ? `${text.slice(0, max - 3)}...` : text);
+type AnalyticsSummary = {
+  chat: number;
+  faq: number;
+  topFaqs: { faqId: number | null; faqTitle: string | null; count: number }[];
+  topFaqs30d: { faqId: number | null; faqTitle: string | null; count: number }[];
+  topQuestions: { message: string; count: number }[];
+  chatTrends: {
+    daily: { bucket: string | Date; count: number }[];
+    weekly: { bucket: string | Date; count: number }[];
+    monthly: { bucket: string | Date; count: number }[];
+  };
+};
+
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
+const snippet = (text: string, max = 80) => (text && text.length > max ? `${text.slice(0, max - 3)}...` : text);
+
+// New UI Palette matching /docs page (Ivory/Earth Tone)
+const ui = {
+  bg: "#F0F0EB",
+  panel: "#FAFAF7",
+  card: "#FFFFFF",
+  border: "#E5E4DF",
+  accent: "#CC785C", // Terra Cotta
+  accentHover: "#B3654A",
+  accentSoft: "#EBD8BC", // Manilla
+  accentLight: "#F5EAD9",
+  text: "#3B3A37",
+  subtext: "#6B665C",
+  success: "#059669",     // Emerald 600
+  successBg: "#ECFDF5",   // Emerald 50
+  danger: "#DC2626",      // Red 600
+  dangerBg: "#FEF2F2",    // Red 50
+  inputBg: "#FFFFFF",
+};
 
 export default function AdminPage() {
-  const ui = {
-    bg: "#F5EFE6",
-    panel: "#FFF9F2",
-    border: "#E6D9C8",
-    accent: "#CC785C",
-    accentSoft: "#EBD8BC",
-    text: "#2F2A25",
-    muted: "#6B665C",
-  };
+  const router = useRouter();
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authorized, setAuthorized] = useState(false);
+  const [activeTab, setActiveTab] = useState<"analytics" | "faq" | "chatbot">("analytics");
 
   // FAQ state
   const [rawText, setRawText] = useState("");
@@ -55,28 +84,44 @@ export default function AdminPage() {
   const [lastSkippedCount, setLastSkippedCount] = useState<number | null>(null);
   const [lastTotalCount, setLastTotalCount] = useState<number | null>(null);
   const [lastRunAt, setLastRunAt] = useState<string | null>(null);
-  const [viewMode, setViewMode] = useState<"table" | "category">("category");
+  const [viewMode, setViewMode] = useState<"table" | "category">("table");
   const [isCreating, setIsCreating] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [editingCategories, setEditingCategories] = useState<Record<number, string>>({});
   const [categories, setCategories] = useState<{ id: number; name: string }[]>([]);
   const [generationNote, setGenerationNote] = useState("");
-  const [analytics, setAnalytics] = useState<{ chat: number; faq: number; topFaqs: { faqId: number | null; faqTitle: string | null; count: number }[] }>({
-    chat: 0,
-    faq: 0,
-    topFaqs: [],
-  });
+
+  // Chatbot settings
   const [chatHeaderText, setChatHeaderText] = useState("");
   const [chatThumbnailUrl, setChatThumbnailUrl] = useState("");
   const [chatThumbnailDataUrl, setChatThumbnailDataUrl] = useState("");
   const [chatSystemPrompt, setChatSystemPrompt] = useState(DEFAULT_SYSTEM_PROMPT);
   const [thumbnailFileName, setThumbnailFileName] = useState("");
-  const [newMediaUrl, setNewMediaUrl] = useState("");
-  const [newMediaKind, setNewMediaKind] = useState<"image" | "video">("image");
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
 
-  const categoryOptions = useMemo(() => categories.map((c) => c.name), [categories]);
+  // Media add state
+  const [newMediaUrl, setNewMediaUrl] = useState("");
+  const [newMediaKind, setNewMediaKind] = useState<"image" | "video">("image");
+
+  // Analytics
+  const [analytics, setAnalytics] = useState<AnalyticsSummary>({
+    chat: 0,
+    faq: 0,
+    topFaqs: [],
+    topFaqs30d: [],
+    topQuestions: [],
+    chatTrends: { daily: [], weekly: [], monthly: [] },
+  });
+  const [logoutLoading, setLogoutLoading] = useState(false);
+
+  const categoryOptions = useMemo(() => {
+    const fromDb = categories.map((c) => c.name);
+    const fromFaqs = faqs
+      .map((f) => f.category)
+      .filter((c): c is string => !!c);
+    return Array.from(new Set([...fromDb, ...fromFaqs])).sort();
+  }, [categories, faqs]);
   const groupedFaqs = useMemo(() => {
     const groups: Record<string, FAQItem[]> = {};
     faqs.forEach((f) => {
@@ -86,6 +131,38 @@ export default function AdminPage() {
     });
     return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
   }, [faqs]);
+
+  // Consistent badge colors
+  const getBadgeColor = (category: string) => {
+    const styles = [
+      { bg: "#E8D5C4", text: "#5C4033", border: "#D4C0AF" },
+      { bg: "#D4E0D9", text: "#2F4F4F", border: "#BFD0C4" },
+      { bg: "#D1D9E6", text: "#36454F", border: "#BCC6D6" },
+      { bg: "#E6D1D1", text: "#5C3333", border: "#D6BDBD" },
+      { bg: "#E0D4E6", text: "#4B365F", border: "#CDBDD6" },
+      { bg: "#D9D2C5", text: "#4A4036", border: "#C4BCAD" },
+      { bg: "#CBD6D6", text: "#3A4A4A", border: "#B6C4C4" },
+    ];
+    let hash = 0;
+    for (let i = 0; i < category.length; i++) {
+      hash = category.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    const idx = Math.abs(hash) % styles.length;
+    return styles[idx];
+  };
+
+  const handleLogout = async () => {
+    setLogoutLoading(true);
+    try {
+      await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
+      router.replace("/login");
+    } catch (err) {
+      console.error(err);
+      setErrorMessage("로그아웃 실패");
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
 
   const parseMedia = (raw: any): MediaItem[] => {
     if (!Array.isArray(raw)) return [];
@@ -108,6 +185,15 @@ export default function AdminPage() {
     setIsCreating(false);
     setSuccessMessage("");
     setEditingCategories((prev) => ({ ...prev, [item.id]: item.category ?? "" }));
+    // scroll to top of editor if needed?
+  };
+
+  const toggleSelectFaq = (item: FAQItem) => {
+    if (selectedFaq?.id === item.id) {
+      clearSelection();
+    } else {
+      selectFaq(item);
+    }
   };
 
   const clearSelection = () => {
@@ -151,18 +237,18 @@ export default function AdminPage() {
       setLastTotalCount(data?.total_after ?? lastTotalCount);
       setLastRunAt(new Date().toLocaleTimeString());
       if (added === 0) {
-        setGenerationNote("신규 항목이 0건입니다. 입력 텍스트가 FAQ 형식이 아니었거나 LLM confidence 필터(기본 0.5)로 모두 제외되었을 수 있습니다. 필요하면 .env의 LLM_CONFIDENCE_THRESHOLD를 낮춰보세요.");
+        setGenerationNote("신규 0건입니다. 텍스트 형식/LLM 신뢰도 필터 설정 확인 필요");
       } else {
         setGenerationNote("");
       }
       await Promise.all([handleFetch(), fetchCategories()]);
       if (items[0]) selectFaq(items[0]);
       setSuccessMessage(
-        `FAQ 반영 완료: 신규 ${added}건, 미반영 ${skipped}건${(data?.total_after ?? lastTotalCount) ? ` · 총 ${data?.total_after ?? lastTotalCount}건` : ""}`
+        `FAQ 정리 완료! 신규 ${added}건 추가됨 (중복 ${skipped}건 제외)`
       );
     } catch (err) {
       console.error(err);
-      setErrorMessage("FAQ 생성 요청에 실패했습니다. 서버 설정을 확인해주세요.");
+      setErrorMessage("FAQ 생성 요청 실패. API 키나 서버 로그를 확인하세요.");
     } finally {
       setLoading(false);
     }
@@ -187,7 +273,7 @@ export default function AdminPage() {
       }
     } catch (err) {
       console.error(err);
-      setErrorMessage("FAQ 목록을 불러오지 못했습니다.");
+      setErrorMessage("FAQ 목록 로드 실패");
     } finally {
       setRefreshing(false);
     }
@@ -199,7 +285,7 @@ export default function AdminPage() {
       setCategories(data?.items ?? []);
     } catch (err) {
       console.error(err);
-      setErrorMessage("카테고리 목록을 불러오지 못했습니다.");
+      setErrorMessage("카테고리 목록 로드 실패");
     }
   };
 
@@ -210,6 +296,9 @@ export default function AdminPage() {
         chat: data?.chatCount ?? 0,
         faq: data?.faqClickCount ?? 0,
         topFaqs: data?.topFaqs ?? [],
+        topFaqs30d: data?.topFaqs30d ?? [],
+        topQuestions: data?.topQuestions ?? [],
+        chatTrends: data?.chatTrends ?? { daily: [], weekly: [], monthly: [] },
       });
     } catch (err) {
       console.error(err);
@@ -228,7 +317,7 @@ export default function AdminPage() {
       setThumbnailFileName("");
     } catch (err) {
       console.error(err);
-      setErrorMessage("챗봇 설정을 불러오지 못했습니다.");
+      setErrorMessage("챗봇 설정 로드 실패");
     } finally {
       setSettingsLoading(false);
     }
@@ -251,10 +340,10 @@ export default function AdminPage() {
       setChatThumbnailDataUrl(data?.settings?.thumbnailDataUrl ?? "");
       const promptFromServer = typeof data?.settings?.systemPrompt === "string" ? data.settings.systemPrompt.trim() : "";
       setChatSystemPrompt(promptFromServer || DEFAULT_SYSTEM_PROMPT);
-      setSuccessMessage("챗봇 설정이 저장되었습니다.");
+      setSuccessMessage("설정이 저장되었습니다.");
     } catch (err) {
       console.error(err);
-      setErrorMessage("챗봇 설정 저장 중 오류가 발생했습니다.");
+      setErrorMessage("설정 저장 실패");
     } finally {
       setSettingsSaving(false);
     }
@@ -267,10 +356,6 @@ export default function AdminPage() {
   };
 
   const addMediaFile = (file: File) => {
-    if (file.size > 5 * 1024 * 1024) {
-      setErrorMessage("파일 크기는 5MB 이하로 업로드해주세요.");
-      return;
-    }
     const reader = new FileReader();
     reader.onload = (ev) => {
       const result = ev.target?.result;
@@ -296,10 +381,10 @@ export default function AdminPage() {
       const { data } = await axios.put(`${apiBase}/api/faq/${selectedFaq.id}`, payload);
       setFaqs((prev) => prev.map((f) => (f.id === data.id ? data : f)));
       selectFaq(data);
-      setSuccessMessage("FAQ가 저장되었습니다.");
+      setSuccessMessage("저장되었습니다.");
     } catch (err) {
       console.error(err);
-      setErrorMessage("FAQ 저장 중 오류가 발생했습니다.");
+      setErrorMessage("저장 실패");
     } finally {
       setSaveLoading(false);
     }
@@ -315,10 +400,10 @@ export default function AdminPage() {
       setFaqs((prev) => [data, ...prev]);
       selectFaq(data);
       setIsCreating(false);
-      setSuccessMessage("FAQ가 추가되었습니다.");
+      setSuccessMessage("추가되었습니다.");
     } catch (err) {
       console.error(err);
-      setErrorMessage("FAQ 생성 중 오류가 발생했습니다.");
+      setErrorMessage("추가 실패");
     } finally {
       setSaveLoading(false);
     }
@@ -336,7 +421,7 @@ export default function AdminPage() {
       setSuccessMessage("삭제되었습니다.");
     } catch (err) {
       console.error(err);
-      setErrorMessage("삭제 중 오류가 발생했습니다.");
+      setErrorMessage("삭제 실패");
     } finally {
       setDeleteLoading(false);
       setShowConfirmDelete(false);
@@ -350,6 +435,14 @@ export default function AdminPage() {
       else next.add(id);
       return next;
     });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === faqs.length && faqs.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(faqs.map((f) => f.id)));
+    }
   };
 
   const handleBulkDelete = async () => {
@@ -366,10 +459,10 @@ export default function AdminPage() {
       } else {
         setSelectedIds(new Set());
       }
-      setSuccessMessage("선택한 FAQ가 삭제되었습니다.");
+      setSuccessMessage(`${ids.length}건 삭제 완료`);
     } catch (err) {
       console.error(err);
-      setErrorMessage("선택 삭제 중 오류가 발생했습니다.");
+      setErrorMessage("일괄 삭제 실패");
     } finally {
       setDeleteLoading(false);
     }
@@ -385,681 +478,630 @@ export default function AdminPage() {
       if (selectedFaq?.id === item.id) {
         selectFaq(data);
       }
-      setSuccessMessage("카테고리가 수정되었습니다.");
+      setSuccessMessage("카테고리 수정됨");
     } catch (err) {
       console.error(err);
-      setErrorMessage("카테고리 수정 중 오류가 발생했습니다.");
+      setErrorMessage("카테고리 수정 실패");
     }
   };
 
   useEffect(() => {
+    axios.defaults.withCredentials = true;
+  }, []);
+
+  useEffect(() => {
+    let canceled = false;
+    const checkAuth = async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (!res.ok) throw new Error("unauthorized");
+        if (!canceled) setAuthorized(true);
+      } catch {
+        if (!canceled) router.replace("/login");
+      } finally {
+        if (!canceled) setAuthLoading(false);
+      }
+    };
+    checkAuth();
+    return () => {
+      canceled = true;
+    };
+  }, [router]);
+
+  useEffect(() => {
+    if (!authorized) return;
     const delay = setTimeout(() => {
       handleFetch();
     }, 300);
     return () => clearTimeout(delay);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchQuery, categoryFilter]);
+  }, [authorized, searchQuery, categoryFilter]);
 
   useEffect(() => {
+    if (!authorized) return;
     fetchCategories();
     handleFetch();
     loadChatSettings();
     fetchAnalytics();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authorized]);
+
+  // UI Components
+  const renderTrendList = (rows: { bucket: string | Date; count: number }[]) => {
+    if (!rows?.length) return <div className="text-xs text-gray-400">데이터 없음</div>;
+    return rows.slice(-8).map((row, idx) => (
+      <div key={idx} className="flex items-center justify-between rounded-lg px-3 py-2 text-sm border-b last:border-0" style={{ borderColor: ui.border }}>
+        <span>{new Date(row.bucket).toLocaleDateString()}</span>
+        <span className="font-semibold">{row.count}</span>
+      </div>
+    ));
+  };
+
+  const EditorBlock = ({ mode }: { mode: "edit" | "create" }) => (
+    <div className="space-y-4">
+      <div>
+        <label className="block text-xs font-semibold mb-1" style={{ color: ui.subtext }}>질문(Title)</label>
+        <input
+          value={editTitle}
+          onChange={(e) => setEditTitle(e.target.value)}
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-opacity-20"
+          style={{ backgroundColor: ui.inputBg, border: `1px solid ${ui.border}`, color: ui.text }}
+          placeholder="질문을 입력하세요"
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold mb-1" style={{ color: ui.subtext }}>답변(Content)</label>
+        <textarea
+          value={editContent}
+          onChange={(e) => setEditContent(e.target.value)}
+          rows={6}
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none transition focus:ring-2 focus:ring-opacity-20 leading-relaxed"
+          style={{ backgroundColor: ui.inputBg, border: `1px solid ${ui.border}`, color: ui.text }}
+          placeholder="답변 내용을 작성하세요"
+        />
+      </div>
+      <div>
+        <label className="block text-xs font-semibold mb-1" style={{ color: ui.subtext }}>카테고리</label>
+        <input
+          value={editCategory ?? ""}
+          onChange={(e) => setEditCategory(e.target.value)}
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none"
+          style={{ backgroundColor: ui.inputBg, border: `1px solid ${ui.border}`, color: ui.text }}
+          placeholder="예: 배송, 환불"
+        />
+      </div>
+
+      {/* Media Attachments */}
+      <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: ui.border, backgroundColor: ui.bg }}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold" style={{ color: ui.subtext }}>첨부 미디어 ({editMedia.length})</span>
+          <div className="flex items-center gap-2">
+            <label className="cursor-pointer inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium bg-white border" style={{ borderColor: ui.border, color: ui.subtext }}>
+              <Plus size={12} /> 파일 업로드
+              <input type="file" accept="image/*,video/*" className="hidden" onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) addMediaFile(file);
+                e.target.value = "";
+              }} />
+            </label>
+          </div>
+        </div>
+
+        {editMedia.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {editMedia.map((m, idx) => (
+              <div key={idx} className="relative group w-20 h-20 rounded-lg overflow-hidden border bg-gray-100" style={{ borderColor: ui.border }}>
+                {m.kind === 'video' ? (
+                  <video src={m.url} className="w-full h-full object-cover" />
+                ) : (
+                  <img src={m.url} alt="preview" className="w-full h-full object-cover" />
+                )}
+                <button
+                  onClick={() => removeMediaAt(idx)}
+                  className="absolute top-1 right-1 bg-black/60 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <input
+            value={newMediaUrl}
+            onChange={(e) => setNewMediaUrl(e.target.value)}
+            placeholder="또는 이미지 URL 입력"
+            className="flex-1 rounded-md px-2 py-1 text-xs border outline-none"
+            style={{ borderColor: ui.border }}
+          />
+          <button onClick={addMediaLink} className="text-xs px-3 py-1 rounded-md font-medium border bg-white" style={{ borderColor: ui.border }}>추가</button>
+        </div>
+      </div>
+
+      {/* Action Buttons */}
+      <div className="flex items-center gap-2 pt-2">
+        <button
+          onClick={mode === "create" ? handleCreate : handleSave}
+          disabled={saveLoading}
+          className="flex-1 rounded-lg py-2.5 text-sm font-semibold text-white shadow-sm transition hover:opacity-90 disabled:opacity-50 flex justify-center items-center gap-2"
+          style={{ backgroundColor: ui.accent }}
+        >
+          {saveLoading && <RefreshCw size={14} className="animate-spin" />}
+          {mode === "create" ? "작성 완료" : "변경사항 저장"}
+        </button>
+
+        {mode === "create" ? (
+          <button onClick={clearSelection} className="px-4 py-2.5 rounded-lg text-sm font-medium border bg-white" style={{ borderColor: ui.border, color: ui.subtext }}>
+            취소
+          </button>
+        ) : (
+          <button
+            onClick={() => setShowConfirmDelete(true)}
+            disabled={deleteLoading}
+            className="px-4 py-2.5 rounded-lg text-sm font-medium border bg-white text-red-600 hover:bg-red-50"
+            style={{ borderColor: ui.border }}
+          >
+            삭제
+          </button>
+        )}
+      </div>
+    </div>
+  );
+
+  if (!authorized) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: ui.bg, color: ui.text }}>
+        {authLoading ? "접속 권한을 확인하는 중입니다..." : "로그인 페이지로 이동합니다..."}
+      </div>
+    );
+  }
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: ui.bg, color: ui.text }}>
-      <div className="mx-auto max-w-6xl px-6 py-10 space-y-8">
-        <header className="rounded-3xl border px-6 py-6 shadow-md" style={{ borderColor: ui.border, backgroundColor: ui.panel }}>
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="text-xs uppercase tracking-widest" style={{ color: ui.muted }}>Admin Console</p>
-              <h1 className="text-3xl font-semibold" style={{ color: ui.text }}>CS 단일 문서 운영</h1>
-              <p className="text-sm" style={{ color: ui.muted }}>챗봇(/chatbot)과 FAQ(/docs)를 한 곳에서 관리합니다.</p>
+    <div className="min-h-screen py-10" style={{ backgroundColor: ui.bg, color: ui.text }}>
+      <div className="mx-auto max-w-6xl px-6 space-y-8">
+
+        {/* Header */}
+        <header className="flex flex-col md:flex-row md:items-end justify-between gap-4">
+          <div className="space-y-2">
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: ui.subtext }}>
+              Admin Console
+            </p>
+            <h1 className="text-3xl font-bold tracking-tight" style={{ color: ui.text }}>
+              운영 관리 허브
+            </h1>
+            <p className="text-sm max-w-lg leading-relaxed" style={{ color: ui.subtext }}>
+              챗봇 데이터와 FAQ 문서를 한곳에서 관리하세요. LLM이 상담 로그를 분석하여 자동으로 FAQ를 생성해줍니다.
+            </p>
+          </div>
+          <div className="flex gap-2 items-center">
+            <div className="px-4 py-2 rounded-full border bg-white text-xs font-semibold shadow-sm" style={{ borderColor: ui.border, color: ui.subtext }}>
+              전체 FAQ <span style={{ color: ui.accent }}>{lastTotalCount ?? faqs.length}</span>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <span className="rounded-full px-3 py-1 text-xs font-semibold" style={{ backgroundColor: ui.accentSoft, color: ui.text, border: `1px solid ${ui.border}` }}>
-                FAQ 총 {lastTotalCount ?? faqs.length ?? 0}건
-              </span>
-            </div>
+            <button
+              onClick={handleLogout}
+              disabled={logoutLoading}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold border bg-white shadow-sm disabled:opacity-60"
+              style={{ borderColor: ui.border, color: ui.text }}
+            >
+              {logoutLoading ? <RefreshCw size={14} className="animate-spin" /> : <LogOut size={14} />}
+              로그아웃
+            </button>
           </div>
         </header>
 
+        {/* Global Messages */}
         {successMessage && (
-          <div className="rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "#6EE7B7", backgroundColor: "#ECFDF3", color: "#065F46" }}>
+          <div className="rounded-xl border px-4 py-3 text-sm flex items-center gap-2 animate-in fade-in slide-in-from-top-2" style={{ borderColor: "#A7F3D0", backgroundColor: ui.successBg, color: ui.success }}>
+            <div className="w-2 h-2 rounded-full bg-emerald-500" />
             {successMessage}
           </div>
         )}
         {errorMessage && (
-          <div className="rounded-xl border px-4 py-3 text-sm" style={{ borderColor: "#FCA5A5", backgroundColor: "#FEF2F2", color: "#991B1B" }}>
+          <div className="rounded-xl border px-4 py-3 text-sm flex items-center gap-2 animate-in fade-in slide-in-from-top-2" style={{ borderColor: "#FECACA", backgroundColor: ui.dangerBg, color: ui.danger }}>
+            <div className="w-2 h-2 rounded-full bg-red-500" />
             {errorMessage}
           </div>
         )}
 
-        <div className="space-y-6">
-          {/* Chat header / thumbnail settings */}
-          <div className="rounded-2xl p-5" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-            <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-              <div className="space-y-3 flex-1">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-lg font-semibold" style={{ color: ui.text }}>챗봇 헤더/썸네일</h2>
-                  {settingsLoading && (
-                    <span className="text-xs" style={{ color: ui.muted }}>
-                      불러오는 중...
-                    </span>
-                  )}
-                </div>
-                <label className="flex flex-col gap-2 text-sm" style={{ color: ui.text }}>
-                  헤더 텍스트
-                  <input
-                    value={chatHeaderText}
-                    onChange={(e) => setChatHeaderText(e.target.value)}
-                    type="text"
-                    className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                    style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                    placeholder="예: 당특순에게 모두 물어보세요!"
-                  />
-                </label>
-                <label className="flex flex-col gap-2 text-sm" style={{ color: ui.text }}>
-                  썸네일 이미지 URL
-                  <input
-                    value={chatThumbnailUrl}
-                    onChange={(e) => setChatThumbnailUrl(e.target.value)}
-                    type="text"
-                    className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                    style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                    placeholder="https://example.com/thumbnail.png"
-                  />
-                </label>
-                <div className="flex flex-col gap-2 text-sm" style={{ color: ui.text }}>
-                  업로드로 교체하기
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (!file) return;
-                      if (file.size > 1_500_000) {
-                        setErrorMessage("이미지 크기는 1.5MB 이하로 업로드해주세요.");
-                        return;
-                      }
-                      const reader = new FileReader();
-                      reader.onload = (ev) => {
-                        const result = ev.target?.result;
-                        if (typeof result === "string") {
-                          setChatThumbnailDataUrl(result);
-                          setThumbnailFileName(file.name);
-                          setChatThumbnailUrl(""); // URL 입력은 지움
-                        }
-                      };
-                      reader.readAsDataURL(file);
-                    }}
-                  />
-                  <p className="text-xs" style={{ color: ui.muted }}>
-                    파일 업로드 시 데이터로 저장되어 서버 재시작 후에도 유지됩니다. (최대 1.5MB)
-                  </p>
-                  {thumbnailFileName && (
-                    <p className="text-xs" style={{ color: ui.text }}>
-                      선택됨: {thumbnailFileName}
-                    </p>
-                  )}
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      className="rounded-lg px-3 py-1 text-xs font-semibold"
-                      style={{ backgroundColor: "#E5E7EB", color: ui.text, border: `1px solid ${ui.border}` }}
-                      onClick={() => {
-                        setChatThumbnailDataUrl("");
-                        setThumbnailFileName("");
-                      }}
-                    >
-                      업로드 취소
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-lg px-3 py-1 text-xs font-semibold"
-                      style={{ backgroundColor: "#E5E7EB", color: ui.text, border: `1px solid ${ui.border}` }}
-                      onClick={() => {
-                        setChatThumbnailUrl("");
-                        setChatThumbnailDataUrl("");
-                        setThumbnailFileName("");
-                      }}
-                    >
-                      기본 이미지로
-                    </button>
-                  </div>
-                </div>
-                <div className="space-y-2 text-sm" style={{ color: ui.text }}>
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-semibold">챗봇 말투/시스템 프롬프트</p>
-                    <button
-                      type="button"
-                      className="rounded-lg px-3 py-1 text-[11px] font-semibold"
-                      style={{ backgroundColor: "#E5E7EB", color: ui.text, border: `1px solid ${ui.border}` }}
-                      onClick={() => setChatSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
-                    >
-                      기본 템플릿 적용
-                    </button>
-                  </div>
-                  <textarea
-                    value={chatSystemPrompt}
-                    onChange={(e) => setChatSystemPrompt(e.target.value)}
-                    rows={10}
-                    className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                    style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text, lineHeight: "1.5" }}
-                    placeholder="챗봇 페르소나, 말투, 응답 규칙을 작성하세요. {{FAQ_LINK}}, {{SUPPORT_LINK}} 변수는 자동 치환됩니다."
-                  />
-                  <p className="text-xs" style={{ color: ui.muted }}>
-                    관리자 입력이 LLM 시스템 프롬프트로 바로 전달됩니다. FAQ 링크({"{FAQ_LINK}"})와 문의 링크({"{SUPPORT_LINK}"}) 플레이스홀더는 자동으로 실제 URL로 교체됩니다.
-                  </p>
-                </div>
-                <p className="text-xs" style={{ color: ui.muted }}>
-                  /chatbot 랜딩 헤더와 썸네일에 반영됩니다. 이미지가 깨지면 기본 이미지로 대체됩니다.
-                </p>
-                <div className="flex items-center gap-2">
-                  <button
-                    disabled={settingsSaving}
-                    onClick={handleSaveChatSettings}
-                    className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                    style={{ backgroundColor: ui.accent, color: "#fff", border: `1px solid ${ui.border}` }}
-                  >
-                    {settingsSaving && (
-                      <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-900 border-t-white" />
-                    )}
-                    저장
-                  </button>
-                  <button
-                    disabled={settingsLoading}
-                    onClick={loadChatSettings}
-                    className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                    style={{ backgroundColor: ui.accentSoft, color: ui.text, border: `1px solid ${ui.border}` }}
-                  >
-                    새로고침
-                  </button>
-                </div>
-              </div>
-              <div
-                className="flex w-full max-w-[220px] flex-col items-center gap-2 rounded-xl border p-3 text-center"
-                style={{ borderColor: ui.border, backgroundColor: "#fff" }}
+        {/* Tabs */}
+        <div className="border-b" style={{ borderColor: ui.border }}>
+          <nav className="flex gap-6">
+            {[
+              { id: "analytics", label: "데이터 분석", icon: BarChart3 },
+              { id: "faq", label: "FAQ 관리", icon: FileText },
+              { id: "chatbot", label: "챗봇 설정", icon: Settings },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id as any)}
+                className={`pb-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${activeTab === tab.id ? "border-current" : "border-transparent opacity-50 hover:opacity-100"}`}
+                style={{ color: activeTab === tab.id ? ui.accent : ui.text }}
               >
-                <div
-                  className="relative h-28 w-28 overflow-hidden rounded-full border"
-                  style={{ borderColor: ui.border, backgroundColor: ui.panel }}
-                >
-                  <img
-                    src={chatThumbnailDataUrl || chatThumbnailUrl || "/capychat_mascot.png"}
-                    alt="썸네일 미리보기"
-                    className="h-full w-full object-cover"
-                    onError={(e) => {
-                      e.currentTarget.onerror = null;
-                      e.currentTarget.src = "/capychat_mascot.png";
-                    }}
-                  />
-                </div>
-                <p className="text-sm font-semibold" style={{ color: ui.text, wordBreak: "keep-all" }}>
-                  {chatHeaderText || "헤더 텍스트"}
-                </p>
-                <p className="text-[11px]" style={{ color: ui.muted }}>
-                  챗봇 랜딩 미리보기
-                </p>
-              </div>
-            </div>
-          </div>
+                <tab.icon size={16} />
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
 
-          {/* Info badges */}
-          <div className="flex flex-wrap gap-3 items-center">
-            <div className="rounded-xl px-4 py-3" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-              <p className="text-xs uppercase tracking-widest" style={{ color: ui.muted }}>FAQ 총량</p>
-              <p className="text-2xl font-semibold">{lastTotalCount ?? faqs.length ?? 0}건</p>
-            </div>
-            <div className="rounded-xl px-4 py-3" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-              <p className="text-xs uppercase tracking-widest" style={{ color: ui.muted }}>최근 생성</p>
-              <p className="text-sm" style={{ color: ui.text }}>신규 {lastAddedCount ?? 0}건 · 미반영 {lastSkippedCount ?? 0}건</p>
-              <p className="text-xs" style={{ color: ui.muted }}>{lastRunAt ? `최근 실행: ${lastRunAt}` : "실행 기록 없음"}</p>
-            </div>
-            <div className="rounded-xl px-4 py-3" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-              <p className="text-xs uppercase tracking-widest" style={{ color: ui.muted }}>챗봇 질문</p>
-              <p className="text-2xl font-semibold">{analytics.chat}</p>
-            </div>
-            <div className="rounded-xl px-4 py-3" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-              <p className="text-xs uppercase tracking-widest" style={{ color: ui.muted }}>FAQ 클릭</p>
-              <p className="text-2xl font-semibold">{analytics.faq}</p>
-            </div>
-          </div>
+        {/* Content Area */}
+        <main className="animate-in fade-in slide-in-from-bottom-4 duration-500">
 
-          {analytics.topFaqs.length > 0 && (
-            <div className="rounded-2xl p-4" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-              <h3 className="text-sm font-semibold" style={{ color: ui.text }}>자주 클릭된 FAQ Top 5</h3>
-              <ul className="mt-2 space-y-1 text-sm" style={{ color: ui.text }}>
-                {analytics.topFaqs.map((f, idx) => (
-                  <li key={`${f.faqId}-${idx}`} className="flex items-center gap-2">
-                    <span className="text-xs text-slate-500">{idx + 1}.</span>
-                    <span className="flex-1">{f.faqTitle || `FAQ #${f.faqId ?? "-"}`}</span>
-                    <span className="text-xs text-slate-600">{f.count}회</span>
-                  </li>
+          {/* ANALYTICS TAB */}
+          {activeTab === "analytics" && (
+            <div className="space-y-6">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {[
+                  { label: "FAQ 총량", val: lastTotalCount ?? faqs.length },
+                  { label: "챗봇 질문 수", val: analytics.chat },
+                  { label: "FAQ 클릭 수", val: analytics.faq },
+                  { label: "최근 생성", val: `+${lastAddedCount ?? 0}` }
+                ].map((stat, i) => (
+                  <div key={i} className="rounded-2xl p-5 border shadow-sm bg-white" style={{ borderColor: ui.border }}>
+                    <p className="text-xs uppercase tracking-wider font-semibold mb-1" style={{ color: ui.subtext }}>{stat.label}</p>
+                    <p className="text-3xl font-bold" style={{ color: ui.text }}>{stat.val}</p>
+                  </div>
                 ))}
-              </ul>
+              </div>
+
+              <div className="grid md:grid-cols-2 gap-6">
+                <div className="rounded-2xl p-6 border bg-white shadow-sm" style={{ borderColor: ui.border }}>
+                  <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: ui.text }}>
+                    <MessageSquare size={16} /> 최근 많이 묻는 질문
+                  </h3>
+                  <div className="space-y-3">
+                    {analytics.topQuestions.length === 0 ? <p className="text-sm text-gray-400">데이터가 없습니다.</p> :
+                      analytics.topQuestions.map((q, i) => (
+                        <div key={i} className="flex justify-between items-center text-sm p-3 rounded-lg bg-gray-50">
+                          <span>{q.message}</span>
+                          <span className="font-bold text-xs bg-white px-2 py-1 rounded border shadow-sm">{q.count}회</span>
+                        </div>
+                      ))
+                    }
+                  </div>
+                </div>
+
+                <div className="rounded-2xl p-6 border bg-white shadow-sm" style={{ borderColor: ui.border }}>
+                  <h3 className="font-semibold mb-4 flex items-center gap-2" style={{ color: ui.text }}>
+                    <BarChart3 size={16} /> 카테고리별/월별 추세
+                  </h3>
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-xs font-semibold mb-2" style={{ color: ui.subtext }}>월간 챗봇 이용 추이</p>
+                      {renderTrendList(analytics.chatTrends.monthly)}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* Input */}
-          <div className="rounded-2xl p-5" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-            <h2 className="text-lg font-semibold" style={{ color: ui.text }}>상담 로그 입력</h2>
-            <div className="mt-4 space-y-3">
-              <textarea
-                value={rawText}
-                onChange={(e) => setRawText(e.target.value)}
-                rows={8}
-                className="w-full rounded-xl px-4 py-3 text-sm outline-none"
-                style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                placeholder={"Q1: 배송 언제 오나요?\nA1: 보통 1~3일 소요됩니다.\nQ2: 결제 영수증 발급?\nA2: 마이페이지 > 주문내역에서 다운로드 가능합니다."}
-              />
-              <div className="flex items-center justify-between">
-                <span className="text-xs" style={{ color: ui.muted }}>카테고리는 자동 분류됩니다.</span>
-                <button
-                  disabled={loading}
-                  onClick={handleGenerate}
-                  className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold shadow-md transition disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ backgroundColor: ui.accent, color: "#fff", border: `1px solid ${ui.border}` }}
-                >
-                  {loading && <span className="h-4 w-4 animate-spin rounded-full border-2 border-slate-900 border-t-white" />}
-                  FAQ로 정리하기
-                </button>
-              </div>
-              {generationNote && (
-                <div className="rounded-lg border px-3 py-2 text-xs" style={{ borderColor: "#FBBF24", backgroundColor: "#FEFCE8", color: ui.text }}>
-                  {generationNote}
-                </div>
-              )}
-            </div>
-          </div>
+          {/* FAQ TAB */}
+          {activeTab === "faq" && (
+            <div className="grid lg:grid-cols-[380px_1fr] gap-8 items-start">
 
-          {/* List + detail */}
-          <div className="rounded-2xl p-5 space-y-4" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-              <div className="flex flex-wrap gap-2 items-center justify-between">
-                <div className="flex flex-wrap gap-2 items-center">
-                  <input
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                  type="search"
-                  placeholder="검색어 입력"
-                  className="rounded-lg px-3 py-2 text-sm outline-none"
-                  style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                />
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value)}
-                  className="rounded-lg px-3 py-2 text-sm outline-none"
-                  style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                >
-                  <option value="">전체</option>
-                  {categoryOptions.map((cat) => (
-                    <option key={cat} value={cat}>
-                      {cat}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  disabled={refreshing}
-                  onClick={() => handleFetch()}
-                  className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ backgroundColor: ui.accentSoft, color: ui.text, border: `1px solid ${ui.border}` }}
-                >
-                  {refreshing && <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-900 border-t-white" />}
-                  검색/새로고침
-                </button>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={startCreate}
-                  className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition"
-                  style={{ backgroundColor: "#DEF7EC", color: "#065F46", border: "1px solid #6EE7B7" }}
-                >
-                  새 FAQ 추가
-                </button>
-                <div className="flex rounded-lg overflow-hidden border" style={{ borderColor: ui.border }}>
+              {/* Left: Generator & Editor */}
+              <div className="space-y-6 sticky top-6">
+                <div className="rounded-2xl border bg-white p-5 shadow-sm" style={{ borderColor: ui.border }}>
+                  <h3 className="font-semibold mb-3 flex items-center gap-2" style={{ color: ui.text }}>
+                    <Save size={16} /> 상담 로그로 자동 생성
+                  </h3>
+                  <textarea
+                    value={rawText}
+                    onChange={e => setRawText(e.target.value)}
+                    className="w-full h-32 text-sm p-3 rounded-xl border outline-none resize-none mb-3"
+                    style={{ backgroundColor: ui.bg, borderColor: ui.border }}
+                    placeholder={`고객과의 상담 내용을 여기에 붙여넣으세요.\nLLM이 자동으로 Q&A를 추출합니다.`}
+                  />
                   <button
-                    className={`px-3 py-1 text-xs ${viewMode === "category" ? "font-semibold" : ""}`}
-                    style={{ backgroundColor: viewMode === "category" ? ui.accent : "#fff", color: viewMode === "category" ? "#fff" : ui.text }}
-                    onClick={() => setViewMode("category")}
+                    onClick={handleGenerate}
+                    disabled={loading}
+                    className="w-full py-2.5 rounded-xl text-sm font-semibold text-white shadow-sm hover:opacity-90 disabled:opacity-50 flex justify-center items-center gap-2"
+                    style={{ backgroundColor: ui.accent }}
                   >
-                    카테고리 뷰
-                  </button>
-                  <button
-                    className={`px-3 py-1 text-xs ${viewMode === "table" ? "font-semibold" : ""}`}
-                    style={{ backgroundColor: viewMode === "table" ? ui.accent : "#fff", color: viewMode === "table" ? "#fff" : ui.text }}
-                    onClick={() => setViewMode("table")}
-                  >
-                    테이블
+                    {loading ? <RefreshCw className="animate-spin" size={16} /> : "FAQ 추출 및 생성하기"}
                   </button>
                 </div>
-                <button
-                  disabled={!selectedIds.size || deleteLoading}
-                  onClick={handleBulkDelete}
-                  className="inline-flex items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                  style={{ backgroundColor: "#FEE2E2", color: "#991B1B", border: "1px solid #FCA5A5" }}
-                >
-                  {deleteLoading && <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />}
-                  선택 삭제 ({selectedIds.size})
-                </button>
-              </div>
-            </div>
 
-            <div className="grid gap-4 lg:grid-cols-3">
-              <div className="lg:col-span-2">
-                {viewMode === "table" ? (
-                  <div className="overflow-x-auto rounded-xl" style={{ border: `1px solid ${ui.border}` }}>
-                    {faqs.length ? (
-                      <table className="min-w-full divide-y" style={{ color: ui.text, borderColor: ui.border }}>
-                        <thead>
-                          <tr className="text-left text-xs uppercase tracking-widest" style={{ color: ui.muted }}>
-                            <th className="px-3 py-2">카테고리</th>
-                            <th className="px-3 py-2">질문</th>
-                            <th className="px-3 py-2">답변 요약</th>
-                            <th className="px-3 py-2">신뢰도</th>
-                            <th className="px-3 py-2">출처</th>
-                            <th className="px-3 py-2">선택</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y text-sm" style={{ borderColor: ui.border }}>
-                          {faqs.map((item) => (
-                            <tr
-                              key={item.id}
-                              className={`cursor-pointer ${selectedFaq?.id === item.id ? "bg-orange-50" : "hover:bg-orange-50/60"}`}
-                              onClick={() => selectFaq(item)}
-                            >
-                              <td className="px-3 py-2">
-                                <select
-                                  className="rounded px-2 py-1 text-xs"
-                                  style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                                  value={editingCategories[item.id] ?? item.category ?? ""}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={(e) => setEditingCategories((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                  onBlur={() => handleInlineCategorySave(item)}
-                                >
-                                  <option value="">미지정</option>
-                                  {categoryOptions.map((cat) => (
-                                    <option key={cat} value={cat}>
-                                      {cat}
-                                    </option>
-                                  ))}
-                                </select>
-                              </td>
-                              <td className="px-3 py-2 font-semibold">{item.title}</td>
-                              <td className="px-3 py-2">{snippet(item.content)}</td>
-                              <td className="px-3 py-2">
-                                {item.confidence != null ? `${Math.round(item.confidence * 100)}%` : <span className="text-slate-500">-</span>}
-                              </td>
-                              <td className="px-3 py-2 text-slate-500">{item.sourceType ?? "llm_import"}</td>
-                              <td className="px-3 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={selectedIds.has(item.id)}
-                                  onClick={(e) => e.stopPropagation()}
-                                  onChange={() => toggleSelectId(item.id)}
-                                />
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    ) : (
-                      <div className="flex flex-col items-start gap-2 rounded-xl border border-dashed px-4 py-6 text-sm" style={{ borderColor: ui.border, color: ui.muted }}>
-                        <p className="font-semibold" style={{ color: ui.text }}>아직 FAQ가 없습니다.</p>
-                        <p>상담 로그를 붙여넣고 “FAQ로 정리하기”를 눌러보세요.</p>
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {groupedFaqs.length ? (
-                      groupedFaqs.map(([cat, items]) => (
-                        <div key={cat} className="rounded-2xl p-4" style={{ backgroundColor: ui.panel, border: `1px solid ${ui.border}` }}>
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-sm uppercase tracking-widest" style={{ color: ui.text }}>{cat}</h4>
-                            <span className="text-xs" style={{ color: ui.muted }}>{items.length}건</span>
-                          </div>
-                          <div className="mt-3 grid gap-3 md:grid-cols-2">
-                            {items.map((item) => (
-                              <div
-                                key={item.id}
-                                className={`group cursor-pointer rounded-xl p-3 transition ${selectedFaq?.id === item.id ? "border border-orange-200 bg-orange-50" : "border border-slate-200 bg-white hover:border-orange-200 hover:bg-orange-50/70"}`}
-                                onClick={() => selectFaq(item)}
-                              >
-                                <div className="flex items-center gap-2 text-xs" style={{ color: ui.muted }}>
-                                  <span className="inline-flex items-center rounded-lg px-2 py-0.5 text-[11px]" style={{ backgroundColor: ui.accentSoft, border: `1px solid ${ui.border}`, color: ui.text }}>
-                                    {item.sourceType ?? "llm_import"}
-                                  </span>
-                                  {item.confidence != null && (
-                                    <span className="text-emerald-600">{Math.round(item.confidence * 100)}%</span>
-                                  )}
-                                  <span className="ml-auto text-[11px] flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedIds.has(item.id)}
-                                      onChange={() => toggleSelectId(item.id)}
-                                    />
-                                    선택
-                                  </span>
-                                </div>
-                                <div className="mt-1 flex items-center gap-2">
-                                  <h5 className="text-sm font-semibold flex-1" style={{ color: ui.text }}>{item.title}</h5>
-                                  <select
-                                    className="rounded px-2 py-1 text-[11px]"
-                                    style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                                    value={editingCategories[item.id] ?? item.category ?? ""}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => setEditingCategories((prev) => ({ ...prev, [item.id]: e.target.value }))}
-                                    onBlur={() => handleInlineCategorySave(item)}
-                                  >
-                                    <option value="">미지정</option>
-                                    {categoryOptions.map((cat) => (
-                                      <option key={cat} value={cat}>
-                                        {cat}
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                                <p className="mt-1 text-xs leading-relaxed" style={{ color: ui.text }}>{snippet(item.content)}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="flex flex-col items-start gap-2 rounded-xl border border-dashed px-4 py-6 text-sm" style={{ borderColor: ui.border, color: ui.muted }}>
-                        <p className="font-semibold" style={{ color: ui.text }}>아직 FAQ가 없습니다.</p>
-                        <p>상담 로그를 붙여넣고 “FAQ로 정리하기”를 눌러보세요.</p>
-                      </div>
-                    )}
+                {/* Editor Panel (Only show if creating or editing) */}
+                {(isCreating || selectedFaq) && (
+                  <div className="rounded-2xl border bg-white p-5 shadow-sm animate-in fade-in slide-in-from-left-4" style={{ borderColor: ui.border }}>
+                    <div className="flex justify-between items-center mb-4">
+                      <h3 className="font-semibold flex items-center gap-2" style={{ color: ui.text }}>
+                        <Edit3 size={16} /> {isCreating ? "새 FAQ 작성" : "FAQ 수정"}
+                      </h3>
+                      <button onClick={clearSelection} className="text-xs hover:underline" style={{ color: ui.subtext }}>닫기</button>
+                    </div>
+                    <EditorBlock mode={isCreating ? "create" : "edit"} />
                   </div>
                 )}
               </div>
 
-              <div className="space-y-4 rounded-xl p-4" style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}` }}>
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm uppercase tracking-widest" style={{ color: ui.muted }}>디테일 패널</h3>
-                  {(selectedFaq || isCreating) && (
-                    <button className="text-xs" style={{ color: ui.muted }} onClick={clearSelection}>
-                      선택 해제
+              {/* Right: List */}
+              <div className="space-y-4">
+                {/* Filters */}
+                <div className="flex flex-wrap gap-3">
+                  <div className="relative flex-1 min-w-[200px]">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                    <input
+                      value={searchQuery}
+                      onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="FAQ 검색..."
+                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border outline-none focus:ring-2 focus:ring-opacity-20 bg-white"
+                      style={{ borderColor: ui.border, color: ui.text }}
+                    />
+                  </div>
+                  <select
+                    value={categoryFilter}
+                    onChange={e => setCategoryFilter(e.target.value)}
+                    className="px-4 py-2.5 rounded-xl border outline-none bg-white text-sm"
+                    style={{ borderColor: ui.border, color: ui.text }}
+                  >
+                    <option value="">전체 카테고리</option>
+                    {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button
+                    onClick={startCreate}
+                    className="px-4 py-2.5 rounded-xl border bg-white text-sm font-semibold hover:bg-gray-50 flex items-center gap-2"
+                    style={{ borderColor: ui.border, color: ui.text }}
+                  >
+                    <Plus size={16} /> 직접 추가
+                  </button>
+
+                  {selectedIds.size > 0 && (
+                    <button
+                      onClick={handleBulkDelete}
+                      disabled={deleteLoading}
+                      className="px-4 py-2.5 rounded-xl border bg-red-50 text-red-600 text-sm font-semibold hover:bg-red-100 flex items-center gap-2 ml-auto"
+                      style={{ borderColor: "transparent" }}
+                    >
+                      <Trash2 size={16} /> {selectedIds.size}건 삭제
                     </button>
                   )}
                 </div>
-                {selectedFaq || isCreating ? (
-                  <div className="space-y-3">
-                    <label className="flex flex-col gap-2 text-sm" style={{ color: ui.text }}>
-                      질문(제목)
-                      <input
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        type="text"
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                        style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm" style={{ color: ui.text }}>
-                      답변
-                      <textarea
-                        value={editContent}
-                        onChange={(e) => setEditContent(e.target.value)}
-                        rows={6}
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                        style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-2 text-sm" style={{ color: ui.text }}>
-                      카테고리
-                      <input
-                        value={editCategory ?? ""}
-                        onChange={(e) => setEditCategory(e.target.value)}
-                        type="text"
-                        className="w-full rounded-lg px-3 py-2 text-sm outline-none"
-                        style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                        placeholder="예: 배송"
-                      />
-                    </label>
-                    <div className="space-y-2 rounded-lg border p-3" style={{ borderColor: ui.border, backgroundColor: ui.panel }}>
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold" style={{ color: ui.text }}>첨부 미디어</p>
-                        <span className="text-xs" style={{ color: ui.muted }}>{editMedia.length}개</span>
-                      </div>
-                      <div className="space-y-2">
-                        {editMedia.length ? (
-                          editMedia.map((m, idx) => (
-                            <div key={`${m.url}-${idx}`} className="flex items-center gap-2 rounded-md border px-2 py-2" style={{ borderColor: ui.border, backgroundColor: "#fff" }}>
-                              <div className="h-10 w-10 overflow-hidden rounded bg-slate-100 flex items-center justify-center">
-                                {m.kind === "video" ? (
-                                  <video className="h-full w-full object-cover" src={m.url} />
-                                ) : (
-                                  <img className="h-full w-full object-cover" src={m.url} alt={m.name || "image"} />
-                                )}
-                              </div>
-                              <div className="flex-1 min-w-0">
-                                <p className="text-xs font-semibold" style={{ color: ui.text }}>
-                                  {m.name || m.url.slice(0, 40)}
-                                </p>
-                                <p className="text-[11px]" style={{ color: ui.muted }}>{m.kind === "video" ? "동영상" : "이미지"}</p>
-                              </div>
-                              <button
-                                type="button"
-                                className="text-xs rounded px-2 py-1"
-                                style={{ color: "#991B1B", backgroundColor: "#FEE2E2", border: "1px solid #FCA5A5" }}
-                                onClick={() => removeMediaAt(idx)}
+
+                {/* List Content */}
+                <div className="rounded-2xl border bg-white overflow-hidden shadow-sm" style={{ borderColor: ui.border }}>
+                  {viewMode === "table" ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-gray-50/50 border-b" style={{ borderColor: ui.border }}>
+                          <tr style={{ color: ui.subtext }}>
+                            <th className="px-6 py-3 font-semibold w-12 text-center">
+                              <input
+                                type="checkbox"
+                                className="accent-gray-500 rounded"
+                                checked={faqs.length > 0 && selectedIds.size === faqs.length}
+                                onChange={toggleSelectAll}
+                                disabled={faqs.length === 0}
+                              />
+                            </th>
+                            <th className="px-4 py-3 font-semibold w-40">카테고리</th>
+                            <th className="px-4 py-3 font-semibold">제목</th>
+                            <th className="px-4 py-3 font-semibold w-48">내용 미리보기</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y" style={{ borderColor: ui.border }}>
+                          {faqs.length === 0 ? (
+                            <tr><td colSpan={4} className="p-8 text-center text-gray-400">데이터가 없습니다.</td></tr>
+                          ) : faqs.map(item => {
+                            const badgeStyle = getBadgeColor(item.category || "기타");
+                            const isSelected = selectedIds.has(item.id);
+                            const isActive = selectedFaq?.id === item.id;
+                            return (
+                              <tr
+                                key={item.id}
+                                onClick={() => selectFaq(item)}
+                                className={`group cursor-pointer transition-colors ${isActive ? "bg-amber-50/50" : "hover:bg-gray-50"}`}
                               >
-                                제거
-                              </button>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-xs" style={{ color: ui.muted }}>첨부된 이미지/동영상이 없습니다.</p>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <div className="flex flex-wrap gap-2">
-                          <select
-                            value={newMediaKind}
-                            onChange={(e) => setNewMediaKind(e.target.value as "image" | "video")}
-                            className="rounded px-2 py-1 text-xs"
-                            style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                          >
-                            <option value="image">이미지</option>
-                            <option value="video">동영상</option>
-                          </select>
-                          <input
-                            value={newMediaUrl}
-                            onChange={(e) => setNewMediaUrl(e.target.value)}
-                            type="text"
-                            className="flex-1 rounded px-2 py-1 text-sm outline-none min-w-[160px]"
-                            style={{ backgroundColor: "#fff", border: `1px solid ${ui.border}`, color: ui.text }}
-                            placeholder="https://example.com/media.png"
-                          />
-                          <button
-                            type="button"
-                            className="rounded px-3 py-1 text-xs font-semibold"
-                            style={{ backgroundColor: ui.accentSoft, color: ui.text, border: `1px solid ${ui.border}` }}
-                            onClick={addMediaLink}
-                          >
-                            링크 추가
-                          </button>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2 text-xs" style={{ color: ui.muted }}>
-                          <input
-                            type="file"
-                            accept="image/*,video/*"
-                            onChange={(e) => {
-                              const file = e.target.files?.[0];
-                              if (file) addMediaFile(file);
-                              e.target.value = "";
-                            }}
-                          />
-                          <span>업로드 시 Base64로 저장됩니다. (5MB 이하 권장)</span>
-                        </div>
-                      </div>
+                                <td className="px-6 py-4 text-center" onClick={e => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => toggleSelectId(item.id)}
+                                    className="w-4 h-4 rounded border-gray-300 accent-gray-600"
+                                  />
+                                </td>
+                                <td className="px-4 py-4">
+                                  <span
+                                    className="inline-flex px-2 py-1 rounded text-xs font-medium border"
+                                    style={{ backgroundColor: badgeStyle.bg, color: badgeStyle.text, borderColor: badgeStyle.border }}
+                                  >
+                                    {item.category || "기타"}
+                                  </span>
+                                </td>
+                                <td className="px-4 py-4 font-medium" style={{ color: ui.text }}>{item.title}</td>
+                                <td className="px-4 py-4 text-gray-500 truncate max-w-[12rem]">{item.content}</td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
                     </div>
-                    <div className="flex items-center justify-between gap-3 pt-2">
-                      <button
-                        disabled={saveLoading}
-                        onClick={isCreating ? handleCreate : handleSave}
-                        className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60"
-                        style={{ backgroundColor: ui.accent, color: "#fff", border: `1px solid ${ui.border}` }}
-                      >
-                        {saveLoading && (
-                          <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-900 border-t-white" />
-                        )}
-                        {isCreating ? "신규 등록" : "저장"}
-                      </button>
-                      {!isCreating && (
-                        <button
-                          disabled={deleteLoading}
-                          onClick={() => setShowConfirmDelete(true)}
-                          className="inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
-                          style={{ backgroundColor: "#FEE2E2", color: "#991B1B", border: "1px solid #FCA5A5" }}
-                        >
-                          {deleteLoading && (
-                            <span className="h-3 w-3 animate-spin rounded-full border-2 border-red-200 border-t-transparent" />
-                          )}
-                          삭제
-                        </button>
-                      )}
+                  ) : (
+                    <div className="p-6 grid gap-6 md:grid-cols-2">
+                      {groupedFaqs.map(([cat, items]) => (
+                        <div key={cat} className="space-y-3">
+                          <h4 className="text-xs font-bold uppercase tracking-widest flex items-center gap-2" style={{ color: ui.subtext }}>
+                            {cat} <span className="px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 text-[10px]">{items.length}</span>
+                          </h4>
+                          <div className="space-y-2">
+                            {items.map(item => {
+                              const isActive = selectedFaq?.id === item.id;
+                              return (
+                                <div
+                                  key={item.id}
+                                  onClick={() => selectFaq(item)}
+                                  className={`p-3 rounded-xl border cursor-pointer transition-all hover:shadow-sm ${isActive ? "ring-2 ring-orange-200 border-orange-300 bg-orange-50/30" : "bg-white border-gray-200 hover:border-gray-300"}`}
+                                >
+                                  <div className="flex justify-between items-start mb-1">
+                                    <span className="font-semibold text-sm" style={{ color: ui.text }}>{item.title}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{item.content}</p>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                      {groupedFaqs.length === 0 && <p className="col-span-2 text-center text-gray-400 py-10">데이터가 없습니다.</p>}
                     </div>
-                  </div>
-                ) : (
-                  <div className="text-sm" style={{ color: ui.muted }}>테이블에서 항목을 클릭하면 이곳에서 수정/삭제할 수 있습니다.</div>
-                )}
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </div>
+          )}
+
+          {/* CHATBOT SETTINGS TAB */}
+          {activeTab === "chatbot" && (
+            <div className="max-w-2xl mx-auto space-y-6">
+              <div className="rounded-2xl border bg-white p-6 shadow-sm" style={{ borderColor: ui.border }}>
+                <h3 className="text-lg font-bold mb-6" style={{ color: ui.text }}>챗봇 스타일 & 프롬프트</h3>
+
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold" style={{ color: ui.subtext }}>헤더 텍스트</label>
+                    <input
+                      value={chatHeaderText}
+                      onChange={e => setChatHeaderText(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border outline-none bg-gray-50"
+                      style={{ borderColor: ui.border }}
+                      placeholder="예: 당특순에게 물어보세요"
+                    />
+                  </div>
+
+                  <div className="space-y-3">
+                    <label className="text-sm font-semibold" style={{ color: ui.subtext }}>썸네일 이미지</label>
+
+                    <div className="flex gap-4 items-start">
+                      {/* Preview */}
+                      <div className="shrink-0">
+                        <div className="w-20 h-20 rounded-full border overflow-hidden bg-gray-100 relative group" style={{ borderColor: ui.border }}>
+                          <img
+                            src={chatThumbnailDataUrl || chatThumbnailUrl || "/capychat_mascot.png"}
+                            alt="Thumbnail"
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              e.currentTarget.onerror = null;
+                              e.currentTarget.src = "/capychat_mascot.png";
+                            }}
+                          />
+                        </div>
+                        <p className="text-[10px] text-center mt-1 text-gray-400">Current</p>
+                      </div>
+
+                      <div className="flex-1 space-y-3">
+                        <input
+                          value={chatThumbnailUrl}
+                          onChange={e => setChatThumbnailUrl(e.target.value)}
+                          placeholder="이미지 URL 입력..."
+                          className="w-full px-4 py-2 rounded-xl border outline-none bg-gray-50 text-sm"
+                          style={{ borderColor: ui.border }}
+                        />
+
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs text-gray-400">또는</span>
+                          <label className="cursor-pointer inline-flex items-center gap-2 px-4 py-2 rounded-xl border bg-white text-sm font-medium hover:bg-gray-50" style={{ borderColor: ui.border, color: ui.text }}>
+                            <Plus size={14} /> 파일 업로드
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (!file) return;
+                                if (file.size > 1_500_000) {
+                                  setErrorMessage("이미지 크기는 1.5MB 이하로 업로드해주세요.");
+                                  return;
+                                }
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  const result = ev.target?.result;
+                                  if (typeof result === "string") {
+                                    setChatThumbnailDataUrl(result);
+                                    setThumbnailFileName(file.name);
+                                    setChatThumbnailUrl("");
+                                  }
+                                };
+                                reader.readAsDataURL(file);
+                              }}
+                            />
+                          </label>
+
+                          {(chatThumbnailDataUrl || thumbnailFileName) && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-emerald-600 font-medium">{thumbnailFileName || "새 이미지 선택됨"}</span>
+                              <button
+                                onClick={() => {
+                                  setChatThumbnailDataUrl("");
+                                  setThumbnailFileName("");
+                                }}
+                                className="text-[10px] underline text-gray-400 hover:text-red-500"
+                              >
+                                취소
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-semibold" style={{ color: ui.subtext }}>시스템 프롬프트</label>
+                    <textarea
+                      value={chatSystemPrompt}
+                      onChange={e => setChatSystemPrompt(e.target.value)}
+                      rows={12}
+                      className="w-full p-4 rounded-xl border outline-none bg-gray-50 text-sm leading-relaxed"
+                      style={{ borderColor: ui.border }}
+                    />
+                    <p className="text-xs text-gray-400">
+                      * 변수 {'{FAQ_LINK}'}, {'{SUPPORT_LINK}'} 사용 가능
+                    </p>
+                  </div>
+
+                  <div className="pt-4 flex justify-end gap-3">
+                    <button
+                      onClick={loadChatSettings}
+                      disabled={settingsLoading}
+                      className="px-5 py-2.5 rounded-xl text-sm font-medium border bg-white"
+                      style={{ borderColor: ui.border }}
+                    >
+                      취소 / 리셋
+                    </button>
+                    <button
+                      onClick={handleSaveChatSettings}
+                      disabled={settingsSaving}
+                      className="px-5 py-2.5 rounded-xl text-sm font-semibold text-white shadow-md flex items-center gap-2"
+                      style={{ backgroundColor: ui.accent }}
+                    >
+                      {settingsSaving && <RefreshCw size={14} className="animate-spin" />}
+                      설정 저장
+                    </button>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          )}
+
+        </main>
 
         {showConfirmDelete && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4">
-            <div className="w-full max-w-md space-y-4 rounded-2xl border border-slate-700 bg-slate-900 p-6 text-white shadow-2xl shadow-black/40">
-              <h3 className="text-lg font-semibold">삭제하시겠습니까?</h3>
-              <p className="text-sm text-slate-300">
-                "{selectedFaq?.title}" 항목을 삭제합니다. 이 작업은 되돌릴 수 없습니다.
-              </p>
-              <div className="flex items-center justify-end gap-3">
-                <button
-                  className="rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-200 hover:border-cyan-400"
-                  onClick={() => setShowConfirmDelete(false)}
-                >
-                  취소
-                </button>
-                <button
-                  disabled={deleteLoading}
-                  onClick={handleDelete}
-                  className="inline-flex items-center gap-2 rounded-lg bg-red-500 px-3 py-2 text-sm font-semibold text-white shadow-md shadow-red-500/30 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {deleteLoading && (
-                    <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/70 border-t-transparent" />
-                  )}
-                  삭제
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm p-4">
+            <div className="bg-white rounded-2xl shadow-xl p-6 w-full max-w-sm space-y-4 animate-in zoom-in-95">
+              <h3 className="font-bold text-lg text-red-600">정말 삭제하시겠습니까?</h3>
+              <p className="text-sm text-gray-600">이 작업은 되돌릴 수 없습니다. 해당 FAQ가 영구적으로 삭제됩니다.</p>
+              <div className="flex gap-3 justify-end pt-2">
+                <button onClick={() => setShowConfirmDelete(false)} className="px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 text-gray-700">취소</button>
+                <button onClick={handleDelete} className="px-4 py-2 rounded-lg text-sm font-medium bg-red-600 text-white shadow-sm">
+                  {deleteLoading ? "삭제 중..." : "삭제 확인"}
                 </button>
               </div>
             </div>
           </div>
         )}
+
       </div>
     </div>
   );
