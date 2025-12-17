@@ -2,6 +2,7 @@
 
 import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 
 type FAQItem = {
@@ -342,7 +343,9 @@ export default function DocsPage() {
                                       <button
                                         key={idx}
                                         type="button"
-                                        onClick={() => {
+                                        onClick={(event) => {
+                                          event.preventDefault();
+                                          event.stopPropagation();
                                           setLightbox({ src: m.url, alt: m.name || "attachment" });
                                         }}
                                         className="h-40 rounded-lg border bg-white overflow-hidden cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400"
@@ -366,34 +369,37 @@ export default function DocsPage() {
         </div>
       </div>
 
-      {lightbox && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          role="dialog"
-          aria-modal="true"
-          aria-label="이미지 크게 보기"
-          onClick={() => setLightbox(null)}
-        >
-          <button
-            type="button"
-            aria-label="닫기"
-            autoFocus
-            className="absolute top-4 right-4 rounded-full bg-black/60 p-2 text-white shadow hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/80"
-            onClick={(e) => {
-              e.stopPropagation();
-              setLightbox(null);
-            }}
+      {lightbox &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+            role="dialog"
+            aria-modal="true"
+            aria-label="이미지 크게 보기"
+            onClick={() => setLightbox(null)}
           >
-            <X size={18} />
-          </button>
-          <img
-            src={lightbox.src}
-            alt={lightbox.alt}
-            className="max-h-[85vh] max-w-[95vw] rounded-xl bg-white shadow-2xl object-contain"
-            onClick={(e) => e.stopPropagation()}
-          />
-        </div>
-      )}
+            <button
+              type="button"
+              aria-label="닫기"
+              autoFocus
+              className="absolute top-4 right-4 rounded-full bg-black/60 p-2 text-white shadow hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/80"
+              onClick={(e) => {
+                e.stopPropagation();
+                setLightbox(null);
+              }}
+            >
+              <X size={18} />
+            </button>
+            <img
+              src={lightbox.src}
+              alt={lightbox.alt}
+              className="max-h-[85vh] max-w-[95vw] rounded-xl bg-white shadow-2xl object-contain"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>,
+          document.body
+        )}
     </div>
   );
 }
