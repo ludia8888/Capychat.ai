@@ -2,7 +2,7 @@
 
 import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronUp, HelpCircle } from "lucide-react";
+import { X } from "lucide-react";
 
 type FAQItem = {
   id: number;
@@ -31,6 +31,7 @@ export default function DocsPage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
 
   const trackEvent = async (payload: Record<string, any>) => {
     try {
@@ -102,6 +103,23 @@ export default function DocsPage() {
   useEffect(() => {
     loadData();
   }, []);
+
+  useEffect(() => {
+    if (!lightbox) return;
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setLightbox(null);
+    };
+    window.addEventListener("keydown", onKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [lightbox]);
 
   // Sort FAQs: Category first, then Title ?? Or just keep API order?
   // Let's sort by Category Name then Title for clean grouping visually
@@ -321,12 +339,16 @@ export default function DocsPage() {
                                     m.kind === "video" ? (
                                       <video key={idx} controls className="h-40 rounded-lg border bg-black/5" src={m.url} />
                                     ) : (
-                                      <img
+                                      <button
                                         key={idx}
-                                        src={m.url}
-                                        alt={m.name || "attachment"}
-                                        className="h-40 rounded-lg border object-cover bg-white"
-                                      />
+                                        type="button"
+                                        onClick={() => {
+                                          setLightbox({ src: m.url, alt: m.name || "attachment" });
+                                        }}
+                                        className="h-40 rounded-lg border bg-white overflow-hidden cursor-zoom-in focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-400"
+                                      >
+                                        <img src={m.url} alt={m.name || "attachment"} className="h-40 w-auto object-cover" />
+                                      </button>
                                     )
                                   )}
                                 </div>
@@ -343,6 +365,35 @@ export default function DocsPage() {
           </div>
         </div>
       </div>
+
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="이미지 크게 보기"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            aria-label="닫기"
+            autoFocus
+            className="absolute top-4 right-4 rounded-full bg-black/60 p-2 text-white shadow hover:bg-black/70 focus:outline-none focus:ring-2 focus:ring-white/80"
+            onClick={(e) => {
+              e.stopPropagation();
+              setLightbox(null);
+            }}
+          >
+            <X size={18} />
+          </button>
+          <img
+            src={lightbox.src}
+            alt={lightbox.alt}
+            className="max-h-[85vh] max-w-[95vw] rounded-xl bg-white shadow-2xl object-contain"
+            onClick={(e) => e.stopPropagation()}
+          />
+        </div>
+      )}
     </div>
   );
 }
