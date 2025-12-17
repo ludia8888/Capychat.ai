@@ -147,6 +147,15 @@ export default function ChatbotClient({
     }
   };
 
+  const handleClose = () => {
+    if (!isEmbed) return;
+    try {
+      window.parent.postMessage({ type: "CAPYCHAT_WIDGET_CLOSE" }, "*");
+    } catch {
+      // ignore close failure
+    }
+  };
+
   return (
     <div className={`flex ${isEmbed ? "h-full min-h-[560px]" : "h-screen"} flex-col bg-white text-gray-900 relative overflow-hidden font-sans`}>
       <div className="bg-black text-white px-6 py-3 flex justify-between items-center shrink-0 w-full z-50 relative">
@@ -155,7 +164,7 @@ export default function ChatbotClient({
           <button onClick={handleRefresh} className="hover:text-gray-300 transition-colors">
             <RefreshCw size={20} />
           </button>
-          <button className="hover:text-gray-300 transition-colors">
+          <button onClick={handleClose} className="hover:text-gray-300 transition-colors">
             <X size={20} />
           </button>
         </div>
