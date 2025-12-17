@@ -9,7 +9,7 @@
  *
  * Optional:
  *   data-position="left|right" (default: right)
- *   data-icon="https://.../icon.png" (launcher icon)
+ *   data-icon="https://.../icon.png" (launcher icon override; default: chatbot thumbnail)
  *   data-chatbot-url="https://YOUR_DOMAIN/chatbot" (override)
  *   data-auto-open="1" (auto open on load)
  *   data-auto-open-delay="1000" (ms)
@@ -76,7 +76,9 @@
   var chatbotUrl = baseChatbotUrl + "?embed=1";
   if (tenantKey) chatbotUrl += "&tenant=" + encodeURIComponent(tenantKey);
 
-  var iconUrl = dataset.icon || (origin ? origin + "/capychat_mascot.png" : "/capychat_mascot.png");
+  var defaultIconUrl = origin ? origin + "/api/public/chat-thumbnail" : "/api/public/chat-thumbnail";
+  if (tenantKey) defaultIconUrl += "?tenant=" + encodeURIComponent(tenantKey);
+  var iconUrl = dataset.icon || defaultIconUrl;
 
   var autoOpen = dataset.autoOpen === "1" || dataset.autoOpen === "true";
   var autoOpenDelay = parseInt(dataset.autoOpenDelay || dataset.openDelay || "0", 10);
@@ -174,7 +176,7 @@
     var img = document.createElement("img");
     img.src = iconUrl;
     img.alt = "챗봇";
-    img.loading = "lazy";
+    img.loading = "eager";
     button.appendChild(img);
 
     var panel = document.createElement("div");
