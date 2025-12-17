@@ -15,6 +15,7 @@ export default function LoginPage() {
   const [signupChannelIdTouched, setSignupChannelIdTouched] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [channelChoices, setChannelChoices] = useState<{ tenantKey: string; tenantName: string }[]>([]);
 
   const slugifyChannelId = (value: string) => value.trim().toLowerCase().replace(/\s+/g, "-");
 
@@ -50,6 +51,7 @@ export default function LoginPage() {
     e?.preventDefault();
     setLoading(true);
     setError("");
+    setChannelChoices([]);
     try {
       const endpoint = mode === "login" ? "/api/auth/login" : "/api/auth/signup";
       const payload =
@@ -64,6 +66,10 @@ export default function LoginPage() {
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (mode === "login" && res.status === 409 && Array.isArray(data?.choices)) {
+          setChannelChoices(data.choices);
+          throw new Error(data?.detail || "로그인할 채널을 선택해 주세요.");
+        }
         throw new Error(data?.detail || (mode === "login" ? "로그인에 실패했습니다." : "회원가입에 실패했습니다."));
       }
       router.replace("/admin");
@@ -113,13 +119,13 @@ export default function LoginPage() {
               채널은 FAQ/챗봇이 붙는 “공간”이에요. 채널마다 데이터가 완전히 분리됩니다.
             </li>
             <li>
-              채널 ID는 임베드/URL에 쓰는 값입니다. 예: <span className="font-mono">/chatbot?tenant=채널ID</span> 또는 위젯 <span className="font-mono">data-tenant</span>.
+              설치 코드는 임베드/URL에 쓰는 값입니다. 예: <span className="font-mono">/chatbot?tenant=설치코드</span> 또는 위젯 <span className="font-mono">data-tenant</span>.
             </li>
             <li>
-              로그인은 <span className="font-semibold">채널 ID(또는 채널 이름)</span> + 이메일/비밀번호로 진행돼요.
+              로그인은 <span className="font-semibold">채널 이름(또는 설치 코드)</span> + 이메일/비밀번호로 진행돼요.
             </li>
             <li>
-              새 채널 만들기에서는 채널 이름이 필수이고, 채널 ID는 자동 생성되며(필요하면 수정 가능) 생성 후 바로 로그인됩니다.
+              새 채널 만들기에서는 채널 이름이 필수이고, 설치 코드는 자동 생성되며(필요하면 수정 가능) 생성 후 바로 로그인됩니다.
             </li>
           </ul>
         </div>
@@ -141,7 +147,7 @@ export default function LoginPage() {
           )}
 
           <div className="space-y-1">
-            <label className="text-sm font-medium text-gray-700">{mode === "login" ? "채널 ID 또는 이름" : "채널 ID (임베드용)"}</label>
+            <label className="text-sm font-medium text-gray-700">{mode === "login" ? "채널 이름 또는 설치 코드" : "설치 코드 (임베드용)"}</label>
             <input
               type="text"
               value={mode === "login" ? loginChannelId : signupChannelId}
@@ -158,10 +164,36 @@ export default function LoginPage() {
             />
             <p className="text-[11px] text-gray-500">
               {mode === "login"
-                ? "미입력 시 기본 채널로 로그인됩니다. (여러 채널을 쓰는 경우 채널 ID를 입력하세요)"
+                ? "비워두면 이메일/비밀번호로 채널을 자동으로 찾습니다. (여러 채널이 나오면 선택 화면이 뜹니다)"
                 : "URL/임베드 코드에서 쓰는 값입니다. 한글도 가능하지만 영문/숫자/하이픈을 추천해요."}
             </p>
           </div>
+
+          {mode === "login" && channelChoices.length > 0 && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+              <p className="text-xs font-semibold text-gray-800">로그인할 채널 선택</p>
+              <div className="flex flex-col gap-2">
+                {channelChoices.map((c) => (
+                  <button
+                    key={c.tenantKey}
+                    type="button"
+                    onClick={() => {
+                      setLoginChannelId(c.tenantKey);
+                      setChannelChoices([]);
+                      setError("");
+                    }}
+                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-sm hover:bg-gray-50"
+                  >
+                    <div className="font-semibold text-gray-800">{c.tenantName}</div>
+                    <div className="text-xs text-gray-500">
+                      설치 코드: <span className="font-mono">{c.tenantKey}</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-gray-500">선택 후 다시 “로그인”을 눌러주세요.</p>
+            </div>
+          )}
           <div className="space-y-1">
             <label className="text-sm font-medium text-gray-700">이메일</label>
             <input

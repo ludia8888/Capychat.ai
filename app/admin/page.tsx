@@ -688,7 +688,7 @@ export default function AdminPage() {
                 <div className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs font-semibold shadow-sm" style={{ borderColor: ui.border, color: ui.subtext }}>
                   <span>현재 채널</span>
                   <span style={{ color: ui.text }}>{tenantInfo.name}</span>
-                  <span className="opacity-60">(ID:</span>
+                  <span className="opacity-60">(설치 코드:</span>
                   <span className="font-mono" style={{ color: ui.text }}>{tenantInfo.key}</span>
                   <span className="opacity-60">)</span>
                 </div>
