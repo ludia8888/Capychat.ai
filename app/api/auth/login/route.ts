@@ -21,9 +21,16 @@ export async function POST(req: Request) {
       return NextResponse.json({ detail: "email, password and tenantKey are required" }, { status: 400 });
     }
 
-    const tenant = await prisma.tenant.findUnique({ where: { key: tenantKey } });
+    let tenant = await prisma.tenant.findUnique({ where: { key: tenantKey } });
+    // Allow logging in using a human-friendly channel name as well.
     if (!tenant) {
-      return NextResponse.json({ detail: "tenant not found" }, { status: 404 });
+      tenant = await prisma.tenant.findFirst({ where: { name: tenantKey } });
+    }
+    if (!tenant) {
+      return NextResponse.json(
+        { detail: "채널을 찾을 수 없습니다. 채널 ID(또는 채널 이름)를 확인하세요." },
+        { status: 404 },
+      );
     }
 
     const user = await prisma.user.findFirst({

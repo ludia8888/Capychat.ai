@@ -35,6 +35,13 @@ type AnalyticsSummary = {
   };
 };
 
+type MeResponse = {
+  user: {
+    tenantKey: string;
+    tenantName: string;
+  };
+};
+
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
 const snippet = (text: string, max = 80) => (text && text.length > max ? `${text.slice(0, max - 3)}...` : text);
 
@@ -62,6 +69,7 @@ export default function AdminPage() {
   const [authLoading, setAuthLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
   const [activeTab, setActiveTab] = useState<"analytics" | "faq" | "chatbot">("analytics");
+  const [tenantInfo, setTenantInfo] = useState<{ key: string; name: string } | null>(null);
 
   // FAQ state
   const [rawText, setRawText] = useState("");
@@ -495,6 +503,10 @@ export default function AdminPage() {
       try {
         const res = await fetch("/api/auth/me", { credentials: "include" });
         if (!res.ok) throw new Error("unauthorized");
+        const data = (await res.json().catch(() => null)) as MeResponse | null;
+        if (!canceled && data?.user?.tenantKey) {
+          setTenantInfo({ key: data.user.tenantKey, name: data.user.tenantName });
+        }
         if (!canceled) setAuthorized(true);
       } catch {
         if (!canceled) router.replace("/login");
@@ -671,6 +683,21 @@ export default function AdminPage() {
             <p className="text-sm max-w-lg leading-relaxed" style={{ color: ui.subtext }}>
               챗봇 데이터와 FAQ 문서를 한곳에서 관리하세요. LLM이 상담 로그를 분석하여 자동으로 FAQ를 생성해줍니다.
             </p>
+            {tenantInfo && (
+              <div className="flex flex-wrap items-center gap-2 pt-1">
+                <div className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs font-semibold shadow-sm" style={{ borderColor: ui.border, color: ui.subtext }}>
+                  <span>현재 채널</span>
+                  <span style={{ color: ui.text }}>{tenantInfo.name}</span>
+                  <span className="opacity-60">(ID:</span>
+                  <span className="font-mono" style={{ color: ui.text }}>{tenantInfo.key}</span>
+                  <span className="opacity-60">)</span>
+                </div>
+                <div className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs shadow-sm" style={{ borderColor: ui.border, color: ui.subtext }}>
+                  <span>임베드:</span>
+                  <code className="font-mono" style={{ color: ui.text }}>/chatbot?tenant={tenantInfo.key}</code>
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex gap-2 items-center">
             <div className="px-4 py-2 rounded-full border bg-white text-xs font-semibold shadow-sm" style={{ borderColor: ui.border, color: ui.subtext }}>

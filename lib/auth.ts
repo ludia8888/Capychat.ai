@@ -42,6 +42,8 @@ export type PublicUser = {
 
 export type PublicUserWithTenant = PublicUser & { tenantKey: string };
 
+export type PublicUserWithTenantAndName = PublicUserWithTenant & { tenantName: string };
+
 const scrypt = (password: string, salt: string) =>
   new Promise<Buffer>((resolve, reject) => {
     crypto.scrypt(password, salt, 64, (err, derivedKey) => {
@@ -99,24 +101,31 @@ export function verifyAuthToken(token: string): TokenPayload {
   return payload;
 }
 
-export async function getUserFromCookies(): Promise<PublicUserWithTenant | null> {
+export async function getUserFromCookies(): Promise<PublicUserWithTenantAndName | null> {
   const token = cookies().get(authCookieName)?.value;
   if (!token) return null;
   try {
     const payload = verifyAuthToken(token);
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, email: true, role: true, tenantId: true, tenant: { select: { key: true } } },
+      select: { id: true, email: true, role: true, tenantId: true, tenant: { select: { key: true, name: true } } },
     });
     if (!user) return null;
-    return { id: user.id, email: user.email, role: user.role, tenantId: user.tenantId, tenantKey: user.tenant.key };
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      tenantId: user.tenantId,
+      tenantKey: user.tenant.key,
+      tenantName: user.tenant.name,
+    };
   } catch (err) {
     console.warn("[auth] token invalid:", (err as Error)?.message);
     return null;
   }
 }
 
-export async function requireAdmin(): Promise<PublicUserWithTenant> {
+export async function requireAdmin(): Promise<PublicUserWithTenantAndName> {
   const user = await getUserFromCookies();
   if (!user) throw new AuthError("Unauthorized", 401);
   if (user.role !== "admin") throw new AuthError("Forbidden", 403);
