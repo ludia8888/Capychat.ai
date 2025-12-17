@@ -19,7 +19,11 @@ export async function resolveTenantId(opts: {
     (req ? req.headers.get("x-tenant-key") : null) ||
     defaultTenantKey();
 
-  const tenant = await prisma.tenant.findUnique({ where: { key } });
+  let tenant = await prisma.tenant.findUnique({ where: { key } });
+  // Fallback: allow resolving by tenant name as well (useful for human-friendly embeds).
+  if (!tenant) {
+    tenant = await prisma.tenant.findFirst({ where: { name: key } });
+  }
   if (!tenant) {
     throw new AuthError("Tenant not found", 404);
   }
