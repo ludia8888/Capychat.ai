@@ -49,6 +49,7 @@ export default function ChatbotClient({
   };
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -70,7 +71,9 @@ export default function ChatbotClient({
           {part}
         </a>
       ) : (
-        <span key={idx}>{part}</span>
+        <span key={idx} className="whitespace-pre-wrap">
+          {part}
+        </span>
       )
     );
   };
@@ -78,6 +81,14 @@ export default function ChatbotClient({
   useEffect(() => {
     scrollToBottom();
   }, [messages, loading]);
+
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "0px";
+    const next = Math.min(el.scrollHeight, hasStarted ? 160 : 96);
+    el.style.height = `${next}px`;
+  }, [input, hasStarted]);
 
   const typeOutAssistant = (fullText: string) => {
     const id = crypto.randomUUID();
@@ -221,20 +232,23 @@ export default function ChatbotClient({
 
         <div className={`w-full relative transition-all duration-500 ease-in-out ${hasStarted ? "mb-2 max-w-3xl" : "mb-0 max-w-2xl"}`}>
           <div className="relative group">
-            <input
-              type="text"
+            <textarea
+              ref={inputRef}
+              rows={1}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.nativeEvent.isComposing) {
-                  handleSend();
-                }
+                if (e.key !== "Enter") return;
+                if (e.nativeEvent.isComposing) return;
+                if (e.shiftKey) return;
+                e.preventDefault();
+                handleSend();
               }}
               onCompositionStart={() => setIsComposing(true)}
               onCompositionEnd={() => setIsComposing(false)}
               placeholder={hasStarted ? "메시지를 입력하세요..." : "궁금한 내용은 무엇이든 물어보세요! ☝️"}
               className={`w-full py-4 pl-6 pr-14 text-base bg-white border border-gray-200 rounded-full shadow-[0_4px_20px_rgba(0,0,0,0.08)] 
-                outline-none focus:border-gray-400 focus:shadow-[0_4px_25px_rgba(0,0,0,0.12)] transition-all placeholder:text-gray-400
+                outline-none focus:border-gray-400 focus:shadow-[0_4px_25px_rgba(0,0,0,0.12)] transition-all placeholder:text-gray-400 resize-none overflow-hidden
                 ${hasStarted ? "text-gray-800" : "text-center md:text-left text-gray-600"}`}
               style={{ textAlign: hasStarted ? "left" : "center" }}
             />
