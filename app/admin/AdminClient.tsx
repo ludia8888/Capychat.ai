@@ -4,7 +4,7 @@ import axios from "axios";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DEFAULT_SYSTEM_PROMPT } from "../../lib/chatbotPrompt";
-import { Edit3, Trash2, Plus, RefreshCw, Save, X, Search, MessageSquare, FileText, BarChart3, Settings, LogOut } from "lucide-react";
+import { Edit3, Trash2, Plus, RefreshCw, Save, X, Search, MessageSquare, FileText, BarChart3, Settings, LogOut, Code2 } from "lucide-react";
 
 type FAQItem = {
   id: number;
@@ -64,12 +64,15 @@ const ui = {
   inputBg: "#FFFFFF",
 };
 
-export default function AdminClient() {
+export default function AdminClient({ initialOrigin }: { initialOrigin: string }) {
   const router = useRouter();
   const [authLoading, setAuthLoading] = useState(true);
   const [authorized, setAuthorized] = useState(false);
-  const [activeTab, setActiveTab] = useState<"analytics" | "faq" | "chatbot">("analytics");
+  const [activeTab, setActiveTab] = useState<"analytics" | "faq" | "chatbot" | "install">("analytics");
   const [tenantInfo, setTenantInfo] = useState<{ key: string; name: string } | null>(null);
+  const [publicOrigin, setPublicOrigin] = useState(initialOrigin || "");
+  const [installCopied, setInstallCopied] = useState(false);
+
 
   // FAQ state
   const [rawText, setRawText] = useState("");
@@ -498,6 +501,14 @@ export default function AdminClient() {
   }, []);
 
   useEffect(() => {
+    try {
+      setPublicOrigin(window.location.origin);
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => {
     let canceled = false;
     const checkAuth = async () => {
       try {
@@ -694,7 +705,7 @@ export default function AdminClient() {
                 </div>
                 <div className="inline-flex items-center gap-2 rounded-full border bg-white px-3 py-1 text-xs shadow-sm" style={{ borderColor: ui.border, color: ui.subtext }}>
                   <span>임베드:</span>
-                  <code className="font-mono" style={{ color: ui.text }}>/chatbot?tenant={tenantInfo.key}</code>
+                  <code className="font-mono" style={{ color: ui.text }}>/chatbot?code={tenantInfo.key}</code>
                 </div>
               </div>
             )}
@@ -736,6 +747,7 @@ export default function AdminClient() {
               { id: "analytics", label: "데이터 분석", icon: BarChart3 },
               { id: "faq", label: "FAQ 관리", icon: FileText },
               { id: "chatbot", label: "챗봇 설정", icon: Settings },
+              { id: "install", label: "위젯 설치", icon: Code2 },
             ].map(tab => (
               <button
                 key={tab.id}
@@ -1108,6 +1120,106 @@ export default function AdminClient() {
                   </div>
 
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* INSTALL TAB */}
+          {activeTab === "install" && (
+            <div className="max-w-3xl mx-auto space-y-6">
+              <div className="rounded-2xl border bg-white p-6 shadow-sm" style={{ borderColor: ui.border }}>
+                <h3 className="text-lg font-bold mb-2" style={{ color: ui.text }}>웹사이트에 챗봇 위젯 설치</h3>
+                <p className="text-sm leading-relaxed" style={{ color: ui.subtext }}>
+                  아래 코드를 <span className="font-semibold">그대로 복사</span>해서 웹사이트에 붙여넣으면,
+                  채널톡처럼 오른쪽 아래에 챗봇 런처가 뜹니다.
+                  <br />
+                  런처 아이콘은 <span className="font-semibold">현재 챗봇 썸네일</span>을 자동으로 사용합니다.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6 shadow-sm space-y-4" style={{ borderColor: ui.border }}>
+                <h4 className="font-semibold flex items-center gap-2" style={{ color: ui.text }}>
+                  <Code2 size={16} /> 복붙용 설치 코드
+                </h4>
+
+                <ol className="list-decimal list-inside text-sm space-y-2" style={{ color: ui.subtext }}>
+                  <li>아래 코드를 복사합니다.</li>
+                  <li>웹사이트의 <span className="font-semibold">푸터(</span><span className="font-mono">&lt;/body&gt;</span><span className="font-semibold"> 바로 위)</span>에 붙여넣습니다.</li>
+                  <li>저장 후 새로고침하면 런처가 나타납니다.</li>
+                </ol>
+
+                <div className="rounded-xl border bg-gray-50 p-4 relative" style={{ borderColor: ui.border }}>
+                  <button
+                    type="button"
+                    className="absolute top-3 right-3 px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white hover:bg-gray-100"
+                    style={{ borderColor: ui.border, color: ui.text }}
+                    onClick={async () => {
+                      const scriptUrl = (publicOrigin || window.location.origin) + "/capychat-widget.js";
+                      const tenant = tenantInfo?.key || "";
+                      const code = `<!-- CapyChat 챗봇 위젯 -->\n<script src="${scriptUrl}" data-install-code="${tenant}" async></script>\n<!-- /CapyChat -->`;
+                      try {
+                        await navigator.clipboard.writeText(code);
+                        setInstallCopied(true);
+                        setTimeout(() => setInstallCopied(false), 1400);
+                      } catch {
+                        // ignore
+                      }
+                    }}
+                  >
+                    {installCopied ? "복사됨" : "코드 복사"}
+                  </button>
+
+                  <pre className="text-xs font-mono whitespace-pre-wrap break-all pr-24" style={{ color: ui.text }}>
+{`<!-- CapyChat 챗봇 위젯 -->
+<script src="${(publicOrigin || "")}/capychat-widget.js" data-install-code="${tenantInfo?.key || ""}" async></script>
+<!-- /CapyChat -->`}
+                  </pre>
+                </div>
+
+                <div className="text-xs" style={{ color: ui.subtext }}>
+                  참고: 웹사이트에 보안 정책(CSP)이 있다면 <span className="font-mono">{publicOrigin || "(현재 도메인)"}</span>에서 스크립트/iframe 로드를 허용해야 할 수 있어요.
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6 shadow-sm space-y-4" style={{ borderColor: ui.border }}>
+                <h4 className="font-semibold" style={{ color: ui.text }}>옵션(원할 때만)</h4>
+                <div className="grid md:grid-cols-2 gap-4">
+                  <div className="rounded-xl border bg-gray-50 p-4" style={{ borderColor: ui.border }}>
+                    <p className="text-sm font-semibold mb-2" style={{ color: ui.text }}>자동으로 열기</p>
+                    <pre className="text-xs font-mono whitespace-pre-wrap break-all" style={{ color: ui.text }}>{`data-auto-open="1"
+data-auto-open-delay="1000"`}</pre>
+                  </div>
+                  <div className="rounded-xl border bg-gray-50 p-4" style={{ borderColor: ui.border }}>
+                    <p className="text-sm font-semibold mb-2" style={{ color: ui.text }}>드래그 이동 끄기</p>
+                    <pre className="text-xs font-mono whitespace-pre-wrap break-all" style={{ color: ui.text }}>{`data-drag="0"`}</pre>
+                  </div>
+                  <div className="rounded-xl border bg-gray-50 p-4" style={{ borderColor: ui.border }}>
+                    <p className="text-sm font-semibold mb-2" style={{ color: ui.text }}>왼쪽에 배치</p>
+                    <pre className="text-xs font-mono whitespace-pre-wrap break-all" style={{ color: ui.text }}>{`data-position="left"`}</pre>
+                  </div>
+                  <div className="rounded-xl border bg-gray-50 p-4" style={{ borderColor: ui.border }}>
+                    <p className="text-sm font-semibold mb-2" style={{ color: ui.text }}>JS로 열고/닫기</p>
+                    <pre className="text-xs font-mono whitespace-pre-wrap break-all" style={{ color: ui.text }}>{`window.CapyChatWidget.open();
+window.CapyChatWidget.close();
+window.CapyChatWidget.toggle();`}</pre>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6 shadow-sm space-y-3" style={{ borderColor: ui.border }}>
+                <h4 className="font-semibold" style={{ color: ui.text }}>미리보기</h4>
+                <p className="text-sm" style={{ color: ui.subtext }}>
+                  위젯이 여는 실제 화면은 아래 링크와 동일합니다.
+                </p>
+                <a
+                  href={`/chatbot?code=${encodeURIComponent(tenantInfo?.key || "")}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold text-white shadow-md hover:brightness-95"
+                  style={{ backgroundColor: ui.accent }}
+                >
+                  챗봇 화면 열기
+                </a>
               </div>
             </div>
           )}

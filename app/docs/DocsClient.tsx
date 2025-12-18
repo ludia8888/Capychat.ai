@@ -22,7 +22,7 @@ type MediaItem = {
 const apiBase = process.env.NEXT_PUBLIC_API_BASE || "";
 
 export default function DocsClient({ tenantKey }: { tenantKey: string }) {
-  const supportLink = `/chatbot?tenant=${encodeURIComponent(tenantKey)}`;
+  const supportLink = `/chatbot?code=${encodeURIComponent(tenantKey)}`;
   const [faqs, setFaqs] = useState<FAQItem[]>([]);
   const [categories, setCategories] = useState<{ id: number; name: string }[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -33,7 +33,7 @@ export default function DocsClient({ tenantKey }: { tenantKey: string }) {
 
   const trackEvent = async (payload: Record<string, any>) => {
     try {
-      await fetch(`/api/analytics/events?tenant=${encodeURIComponent(tenantKey)}`, {
+      await fetch(`/api/analytics/events?code=${encodeURIComponent(tenantKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

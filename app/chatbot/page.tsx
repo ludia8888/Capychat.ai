@@ -36,7 +36,11 @@ export default async function ChatbotPage({
   const rawEmbed = searchParams?.embed;
   const isEmbed = rawEmbed == "1" || (Array.isArray(rawEmbed) && rawEmbed[0] == "1");
 
-  const tenantKeyFromQuery = firstParam(searchParams?.tenant)?.trim();
+  const tenantKeyFromQuery =
+    firstParam(searchParams?.code)?.trim() ||
+    firstParam(searchParams?.installCode)?.trim() ||
+    firstParam(searchParams?.channel)?.trim() ||
+    firstParam(searchParams?.tenant)?.trim();
 
   const envTenantKeyRaw = process.env.NEXT_PUBLIC_TENANT_KEY;
   const envTenantKey = envTenantKeyRaw && envTenantKeyRaw !== "default" ? envTenantKeyRaw : undefined;
@@ -46,7 +50,7 @@ export default async function ChatbotPage({
 
     if (fallbackTenantKey) {
       const params = new URLSearchParams();
-      params.set("tenant", fallbackTenantKey);
+      params.set("code", fallbackTenantKey);
       if (isEmbed) params.set("embed", "1");
       redirect(`/chatbot?${params.toString()}`);
     }
@@ -56,7 +60,7 @@ export default async function ChatbotPage({
         isEmbed={!!isEmbed}
         title="채널을 지정해 주세요"
         actionPath="/chatbot"
-        examplePath="/chatbot?tenant=설치코드"
+        examplePath="/chatbot?code=설치코드"
       />
     );
   }
@@ -70,7 +74,7 @@ export default async function ChatbotPage({
   try {
     // NOTE: `Request`/Fetch headers only allow ByteString values. Tenant keys/names can be non-ASCII
     // (e.g. Korean), so we pass tenant via query string instead of custom headers.
-    const req = new Request(`http://internal/chatbot?tenant=${encodeURIComponent(tenantKeyFromQuery)}`);
+    const req = new Request(`http://internal/chatbot?code=${encodeURIComponent(tenantKeyFromQuery)}`);
     const tenant = await resolveTenantId({ req });
     const settings = await getChatSettings(tenant.id);
     initialSettings = {
@@ -86,7 +90,7 @@ export default async function ChatbotPage({
         title="요청하신 채널을 찾을 수 없어요"
         description="링크/임베드 코드의 설치 코드를 다시 확인해 주세요."
         actionPath="/chatbot"
-        examplePath="/chatbot?tenant=설치코드"
+        examplePath="/chatbot?code=설치코드"
       />
     );
   }

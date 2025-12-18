@@ -31,7 +31,11 @@ export default async function DocsPage({
 }) {
   const user = await getUserFromCookies();
 
-  const tenantKeyFromQuery = firstParam(searchParams?.tenant)?.trim();
+  const tenantKeyFromQuery =
+    firstParam(searchParams?.code)?.trim() ||
+    firstParam(searchParams?.installCode)?.trim() ||
+    firstParam(searchParams?.channel)?.trim() ||
+    firstParam(searchParams?.tenant)?.trim();
 
   const envTenantKeyRaw = process.env.NEXT_PUBLIC_TENANT_KEY;
   const envTenantKey = envTenantKeyRaw && envTenantKeyRaw !== "default" ? envTenantKeyRaw : undefined;
@@ -41,7 +45,7 @@ export default async function DocsPage({
 
     if (fallbackTenantKey) {
       const params = new URLSearchParams();
-      params.set("tenant", fallbackTenantKey);
+      params.set("code", fallbackTenantKey);
       redirect(`/docs?${params.toString()}`);
     }
 
@@ -49,7 +53,7 @@ export default async function DocsPage({
       <ChannelRequired
         title="채널을 지정해 주세요"
         actionPath="/docs"
-        examplePath="/docs?tenant=설치코드"
+        examplePath="/docs?code=설치코드"
       />
     );
   }

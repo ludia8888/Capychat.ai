@@ -3,7 +3,7 @@
  * Embed example:
  *   <script
  *     src="https://YOUR_DOMAIN/capychat-widget.js"
- *     data-tenant="YOUR_TENANT_KEY"
+ *     data-install-code="YOUR_INSTALL_CODE"
  *     async
  *   ></script>
  *
@@ -69,15 +69,15 @@
   }
 
   var dataset = (script && script.dataset) || {};
-  var tenantKey = dataset.tenant || dataset.tenantKey || "";
+  var tenantKey = dataset.installCode || dataset.code || dataset.channel || dataset.tenant || dataset.tenantKey || "";
   var position = dataset.position === "left" ? "left" : "right";
 
   var baseChatbotUrl = dataset.chatbotUrl || (origin ? origin + "/chatbot" : "/chatbot");
   var chatbotUrl = baseChatbotUrl + "?embed=1";
-  if (tenantKey) chatbotUrl += "&tenant=" + encodeURIComponent(tenantKey);
+  if (tenantKey) chatbotUrl += "&code=" + encodeURIComponent(tenantKey);
 
   var defaultIconUrl = origin ? origin + "/api/public/chat-thumbnail" : "/api/public/chat-thumbnail";
-  if (tenantKey) defaultIconUrl += "?tenant=" + encodeURIComponent(tenantKey);
+  if (tenantKey) defaultIconUrl += "?code=" + encodeURIComponent(tenantKey);
   var iconUrl = dataset.icon || defaultIconUrl;
 
   var autoOpen = dataset.autoOpen === "1" || dataset.autoOpen === "true";

@@ -14,8 +14,13 @@ export async function resolveTenantId(opts: {
   }
 
   const req = opts.req;
+  const url = req ? new URL(req.url) : null;
   const key =
-    (req ? new URL(req.url).searchParams.get("tenant") : null) ||
+    (url ? url.searchParams.get("code") : null) ||
+    (url ? url.searchParams.get("installCode") : null) ||
+    (url ? url.searchParams.get("channel") : null) ||
+    (url ? url.searchParams.get("tenant") : null) ||
+    (req ? req.headers.get("x-capychat-code") : null) ||
     (req ? req.headers.get("x-tenant-key") : null) ||
     defaultTenantKey();
 

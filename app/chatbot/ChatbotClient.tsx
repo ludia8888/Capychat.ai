@@ -37,7 +37,7 @@ export default function ChatbotClient({
 
   const trackEvent = async (payload: Record<string, any>) => {
     try {
-      await fetch(`/api/analytics/events?tenant=${encodeURIComponent(tenantKey)}`, {
+      await fetch(`/api/analytics/events?code=${encodeURIComponent(tenantKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
@@ -128,7 +128,7 @@ export default function ChatbotClient({
     trackEvent({ type: "chat_question", message: trimmed, payload: { length: trimmed.length } });
 
     try {
-      const res = await fetch(`/api/chatbot?tenant=${encodeURIComponent(tenantKey)}`, {
+      const res = await fetch(`/api/chatbot?code=${encodeURIComponent(tenantKey)}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: trimmed }),

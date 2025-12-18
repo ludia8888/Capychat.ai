@@ -40,7 +40,7 @@ export default function ChannelRequired({
           <div className="space-y-1">
             <label className="block text-xs font-semibold text-gray-700">설치 코드</label>
             <input
-              name="tenant"
+              name="code"
               required
               placeholder="예: dangteuksun"
               className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"

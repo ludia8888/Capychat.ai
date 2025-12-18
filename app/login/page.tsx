@@ -119,7 +119,7 @@ export default function LoginPage() {
               채널은 FAQ/챗봇이 붙는 “공간”이에요. 채널마다 데이터가 완전히 분리됩니다.
             </li>
             <li>
-              설치 코드는 임베드/URL에 쓰는 값입니다. 예: <span className="font-mono">/chatbot?tenant=설치코드</span> 또는 위젯 <span className="font-mono">data-tenant</span>.
+              설치 코드는 임베드/URL에 쓰는 값입니다. 예: <span className="font-mono">/chatbot?code=설치코드</span> 또는 위젯 <span className="font-mono">data-install-code</span>.
             </li>
             <li>
               로그인은 <span className="font-semibold">채널 이름(또는 설치 코드)</span> + 이메일/비밀번호로 진행돼요.
