@@ -36,9 +36,9 @@ export default function DocsPage() {
 
   const trackEvent = async (payload: Record<string, any>) => {
     try {
-      await fetch("/api/analytics/events", {
+      await fetch(`/api/analytics/events?tenant=${encodeURIComponent(tenantKey)}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", "x-tenant-key": tenantKey },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         keepalive: true,
       });

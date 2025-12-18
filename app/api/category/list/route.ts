@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import { prisma } from "../../../../lib/db";
+import { getUserFromCookies } from "../../../../lib/auth";
 import { resolveTenantId } from "../../../../lib/tenant";
+
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 export async function GET(req: Request) {
   try {
-    const tenant = await resolveTenantId({ req });
+    const user = await getUserFromCookies();
+    const tenant = await resolveTenantId({ tenantIdFromUser: user?.tenantId, req });
     const categories = await prisma.category.findMany({
       where: { tenantId: tenant.id },
       orderBy: { name: "asc" },

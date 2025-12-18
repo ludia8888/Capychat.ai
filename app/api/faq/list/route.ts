@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listFAQs } from "../../../../lib/faq";
+import { getUserFromCookies } from "../../../../lib/auth";
 import { resolveTenantId } from "../../../../lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -7,7 +8,8 @@ export const revalidate = 0;
 
 export async function GET(req: Request) {
   try {
-    const tenant = await resolveTenantId({ req });
+    const user = await getUserFromCookies();
+    const tenant = await resolveTenantId({ tenantIdFromUser: user?.tenantId, req });
     const { searchParams } = new URL(req.url);
     const query = searchParams.get("query") || undefined;
     const category = searchParams.get("category") || undefined;
